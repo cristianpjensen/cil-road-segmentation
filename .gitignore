@@ -162,5 +162,7 @@ cython_debug/
 *.ipynb
 data/
 submissions/
+experiments/
+temp/
 *.csv
 .DS_Store
