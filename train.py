@@ -12,6 +12,7 @@ from tqdm import tqdm
 
 from models.create_model import create_model
 from dataset import ImageSegmentationDataset
+from evaluation import eval_f1_score
 from constants import DEVICE
 
 # Get rid of warnings
@@ -21,6 +22,7 @@ ex = Experiment()
 observer = FileStorageObserver(basedir="experiments", resource_dir="data")
 ex.observers.append(observer)
 ex.captured_out_filter = apply_backspaces_and_linefeeds
+
 
 @ex.config
 def config():
@@ -42,13 +44,6 @@ def get_iterator(iterator, is_pbar, **kwargs):
     return tqdm(iterator, **kwargs) if is_pbar else iterator
 
 
-def eval_score(pred, target):
-    """Accuracy for binary classification."""
-
-    pred = (pred > 0.5).float()
-    return torch.mean((pred == target).float())
-
-
 def save_data(loader, denormalize, path):
     os.makedirs(os.path.join(observer.dir, path, "input"))
     os.makedirs(os.path.join(observer.dir, path, "target"))
@@ -67,7 +62,6 @@ def save_data(loader, denormalize, path):
                 ex.add_artifact(tmp_file.name, os.path.join(path, "target", f"{image_count+i:04d}.png"))
 
         image_count += input_.shape[0]
-
 
 
 @ex.automain
@@ -133,7 +127,7 @@ def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_s
         for (input_, target) in get_iterator(valid_loader, leave=False):
             input_, target = input_.to(DEVICE), target.to(DEVICE)
             pred = model.predict(input_)
-            score = eval_score(pred, target)
+            score = eval_f1_score(pred, target)
             total_valid_score += score.item() * input_.shape[0]
 
             if epoch % output_images_every == 0:
@@ -173,3 +167,5 @@ def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_s
 
     # Test
     model.eval()
+
+    # TODO: Output submission file

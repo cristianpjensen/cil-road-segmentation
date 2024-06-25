@@ -1,3 +1,10 @@
+"""
+Most simple model possible, a single linear layer. This model serves as a template for new models
+and as a test model for the training pipeline, since it is very fast (even on the CPU). When creating
+a new model, make sure to update `create_model()` in `models/create_model.py` to return the new
+model.
+"""
+
 from models.base import BaseModel
 import torch
 import torch.nn as nn
@@ -20,6 +27,7 @@ class DummyModel(BaseModel):
     def predict(self, input_BCHW):
         input_BHWC = input_BCHW.permute(0, 2, 3, 1)
         return F.sigmoid(self.model(input_BHWC).squeeze(-1))
+
 
 class Dummy(nn.Module):
     def __init__(self):
