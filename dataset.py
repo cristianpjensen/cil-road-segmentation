@@ -31,9 +31,9 @@ class ImageSegmentationDataset(Dataset):
         ):
 
         # Save data in memory for faster access (dataset is small)
-        self.input_NCHW = self._get_sorted_images(input_dir, is_target=False).float()
+        self.input_NCHW = self._get_sorted_images(input_dir, is_target=False).float() / 255
         if target_dir is not None:
-            self.target_NHW = self._get_sorted_images(target_dir, is_target=True) / 255
+            self.target_NHW = self._get_sorted_images(target_dir, is_target=True).float() / 255
         else:
             self.target_NHW = None
 

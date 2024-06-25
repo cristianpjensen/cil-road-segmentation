@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from models.create_model import create_model
 from dataset import ImageSegmentationDataset
-from evaluation import eval_f1_score
+from evaluation import eval_f1_score, get_mask
 from constants import DEVICE
 
 # Get rid of warnings
@@ -36,7 +36,7 @@ def config():
         "patience": 50,
         "min_delta": 1e-4,
     }
-    output_images_every = 50
+    output_images_every = 10
 
 
 @ex.capture
@@ -62,6 +62,27 @@ def save_data(loader, denormalize, path):
                 ex.add_artifact(tmp_file.name, os.path.join(path, "target", f"{image_count+i:04d}.png"))
 
         image_count += input_.shape[0]
+
+
+def output_mask_overlay(epoch: int, image_count: int, input_: torch.Tensor, pred: torch.Tensor):
+    mask_BHW = get_mask(pred)
+    red_mask_BCHW = mask_BHW.unsqueeze(1) * torch.tensor([1, 0, 0]).unsqueeze(-1).unsqueeze(-1).unsqueeze(0)
+    overlay_BCHW = input_
+    overlay_BCHW[mask_BHW.bool().unsqueeze(1).repeat(1, 3, 1, 1)] *= 0.5
+    overlay_BCHW += 0.5 * red_mask_BCHW
+
+    for i, overlay_img in enumerate(overlay_BCHW):
+        with tempfile.NamedTemporaryFile() as tmp_file:
+            write_png((overlay_img * 255).byte(), tmp_file.name)
+            ex.add_artifact(tmp_file.name, os.path.join(f"epoch_{epoch}", "valid_patch_overlay", f"{image_count+i:04d}.png"))
+
+
+def output_pixel_pred(epoch: int, image_count: int, pred: torch.Tensor):
+    pred_out = (pred.unsqueeze(1) * 255).byte().cpu()
+    for i, pred_img in enumerate(pred_out):
+        with tempfile.NamedTemporaryFile() as tmp_file:
+            write_png(pred_img, tmp_file.name)
+            ex.add_artifact(tmp_file.name, os.path.join(f"epoch_{epoch}", "valid_pixel_pred", f"{image_count+i:04d}.png"))
 
 
 @ex.automain
@@ -118,7 +139,8 @@ def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_s
 
         # Predict validation images every `output_images_every`` epochs and save the images as artifacts
         if epoch % output_images_every == 0:
-            os.makedirs(os.path.join(observer.dir, f"epoch_{epoch}", "valid_outputs"))
+            os.makedirs(os.path.join(observer.dir, f"epoch_{epoch}", "valid_pixel_pred"))
+            os.makedirs(os.path.join(observer.dir, f"epoch_{epoch}", "valid_patch_overlay"))
             image_count = 0
 
         # Validation
@@ -131,12 +153,8 @@ def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_s
             total_valid_score += score.item() * input_.shape[0]
 
             if epoch % output_images_every == 0:
-                pred = (pred.unsqueeze(1) * 255).byte().cpu()
-                for i, pred_img in enumerate(pred):
-                    with tempfile.NamedTemporaryFile() as tmp_file:
-                        write_png(pred_img, tmp_file.name)
-                        ex.add_artifact(tmp_file.name, os.path.join(f"epoch_{epoch}", "valid_outputs", f"{image_count+i:04d}.png"))
-
+                output_pixel_pred(epoch, image_count, pred)
+                output_mask_overlay(epoch, image_count, data.denormalize(input_), pred)
                 image_count += input_.shape[0]
 
         train_loss = total_train_loss / len(train_data)
