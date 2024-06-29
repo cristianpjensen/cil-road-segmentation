@@ -5,8 +5,6 @@ from glob import glob
 from torchvision.io import read_image
 from torchvision.io import ImageReadMode
 
-from constants import DEVICE
-
 
 class ImageSegmentationDataset(Dataset):
     """Dataset for image segmentation tasks.
@@ -31,10 +29,13 @@ class ImageSegmentationDataset(Dataset):
         ):
 
         # Save data in memory for faster access (dataset is small)
-        self.input_NCHW = self._get_sorted_images(input_dir, is_target=False).float() / 255
+        self.file_names = self._get_image_files(input_dir)
+        self.input_NCHW = self._get_images(input_dir, self.file_names, is_target=False).float() / 255
         if target_dir is not None:
-            self.target_NHW = self._get_sorted_images(target_dir, is_target=True).float() / 255
+            self.target_file_names = self._get_image_files(target_dir)
+            self.target_NHW = self._get_images(target_dir, self.target_file_names, is_target=True).float() / 255
         else:
+            self.target_file_names = None
             self.target_NHW = None
 
         # Normalize input images
@@ -60,10 +61,13 @@ class ImageSegmentationDataset(Dataset):
     def denormalize(self, x):
         return x * self.channel_stds + self.channel_means
 
-    def _get_sorted_images(self, dir: str, is_target=False):
+    def _get_image_files(self, dir: str):
+        return sorted([path.split("/")[-1] for path in glob(os.path.join(dir, "*"))])
+
+    def _get_images(self, dir: str, file_names: str, is_target=False):
         image_tensors = []
-        for path in sorted(glob(os.path.join(dir, "*"))):
-            im = read_image(path, ImageReadMode.GRAY if is_target else ImageReadMode.RGB)
+        for file_name in file_names:
+            im = read_image(os.path.join(dir, file_name), ImageReadMode.GRAY if is_target else ImageReadMode.RGB)
             if not is_target:
                 im = im.unsqueeze(0)
             image_tensors.append(im)
@@ -71,16 +75,14 @@ class ImageSegmentationDataset(Dataset):
         return torch.cat(image_tensors, dim=0).float()
 
     def __getitem__(self, item):
-        input_CHW = self.input_NCHW[item]
         if self.target_NHW is not None:
-            target_HW = self.target_NHW[item]
-            return input_CHW, target_HW
+            return self.input_NCHW[item], self.file_names[item], self.target_NHW[item], self.target_file_names[item]
 
-        return input_CHW, None
+        return self.input_NCHW[item], self.file_names[item]
 
     def __len__(self):
         return self.input_NCHW.shape[0]
 
     def pos_weight(self):
-        """Positive / negative occurrence ratio."""
+        """Negative / positive occurrence ratio."""
         return (1 - self.target_NHW).sum() / self.target_NHW.sum()

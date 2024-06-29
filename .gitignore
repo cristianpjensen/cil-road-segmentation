@@ -160,7 +160,7 @@ cython_debug/
 #.idea/
 
 data/
-submissions/
+submission_
 experiments/
 temp/
 *.csv

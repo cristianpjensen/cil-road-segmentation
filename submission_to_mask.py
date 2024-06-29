@@ -1,54 +1,57 @@
-#!/usr/bin/python
+"""
+Script to convert a submission file to a mask image for the first five test images. Adapted from the
+provided code.
+
+Usage: `python submission_to_mask.py <experiment_id>`
+
+"""
+
 import os
 import sys
-import Image
-import math
-import matplotlib.image as mpimg
+from PIL import Image
 import numpy as np
+from constants import PATCH_SIZE, IMAGE_WIDTH, IMAGE_HEIGHT
 
-label_file = 'dummy_submission.csv'
 
-h = 16
-w = h
-imgwidth = int(math.ceil((600.0/w))*w)
-imgheight = int(math.ceil((600.0/h))*h)
-nc = 3
+def main():
+    # Read experiment from command-line
+    experiment = sys.argv[1]
+    for i in range(144, 149):
+        reconstruct_from_labels(os.path.join("experiments", experiment, "submission.csv"), i)
 
-# Convert an array of binary labels to a uint8
+
 def binary_to_uint8(img):
-    rimg = (img * 255).round().astype(np.uint8)
-    return rimg
+    return (img * 255).round().astype(np.uint8)
 
-def reconstruct_from_labels(image_id):
-    im = np.zeros((imgwidth, imgheight), dtype=np.uint8)
-    f = open(label_file)
+
+def reconstruct_from_labels(path, image_id):
+    im = np.zeros((IMAGE_WIDTH, IMAGE_HEIGHT), dtype=np.uint8)
+    f = open(path)
     lines = f.readlines()
-    image_id_str = '%.3d_' % image_id
+    image_id_str = f"{image_id:03d}_"
     for i in range(1, len(lines)):
         line = lines[i]
         if not image_id_str in line:
             continue
 
-        tokens = line.split(',')
+        tokens = line.split(",")
         id = tokens[0]
         prediction = int(tokens[1])
-        tokens = id.split('_')
+        tokens = id.split("_")
         i = int(tokens[1])
         j = int(tokens[2])
 
-        je = min(j+w, imgwidth)
-        ie = min(i+h, imgheight)
+        je = min(j+PATCH_SIZE, IMAGE_WIDTH)
+        ie = min(i+PATCH_SIZE, IMAGE_HEIGHT)
         if prediction == 0:
-            adata = np.zeros((w,h))
+            adata = np.zeros((PATCH_SIZE, PATCH_SIZE))
         else:
-            adata = np.ones((w,h))
+            adata = np.ones((PATCH_SIZE, PATCH_SIZE))
 
         im[j:je, i:ie] = binary_to_uint8(adata)
 
-    Image.fromarray(im).save('prediction_' + '%.3d' % image_id + '.png')
+    Image.fromarray(im).save(f"submission_{image_id:03d}.png")
 
-    return im
 
-for i in range(1, 5):
-    reconstruct_from_labels(i)
-
+if __name__ == "__main__":
+    main()

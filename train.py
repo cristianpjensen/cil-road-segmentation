@@ -11,9 +11,10 @@ from sacred.observers import FileStorageObserver
 from tqdm import tqdm
 
 from models.create_model import create_model
+from models.base import BaseModel
 from dataset import ImageSegmentationDataset
-from evaluation import eval_f1_score, get_mask
-from constants import DEVICE
+from evaluation import eval_f1_score, get_mask, patchify
+from constants import DEVICE, FOREGROUND_THRESHOLD
 
 # Get rid of warnings
 sacred.SETTINGS["CAPTURE_MODE"] = "sys"
@@ -37,6 +38,7 @@ def config():
         "min_delta": 1e-4,
     }
     output_images_every = 10
+    train_split = 0.8
 
 
 @ex.capture
@@ -44,63 +46,88 @@ def get_iterator(iterator, is_pbar, **kwargs):
     return tqdm(iterator, **kwargs) if is_pbar else iterator
 
 
-def save_data(loader, denormalize, path):
-    os.makedirs(os.path.join(observer.dir, path, "input"))
-    os.makedirs(os.path.join(observer.dir, path, "target"))
-    image_count = 0
-    for (input_, target) in loader:
-        input_ = denormalize(input_).byte()
-        target = (target.unsqueeze(1) * 255).byte()
+def output_mask_overlay(epoch: int, file_names: tuple[str], input_BCHW: torch.Tensor, pred_BHW: torch.Tensor):
+    """Output input images with the predicted patch-wise mask overlaid on top in red."""
 
-        for i in range(input_.shape[0]):
-            with tempfile.NamedTemporaryFile() as tmp_file:
-                write_png(input_[i], tmp_file.name)
-                ex.add_artifact(tmp_file.name, os.path.join(path, "input", f"{image_count+i:04d}.png"))
-
-            with tempfile.NamedTemporaryFile() as tmp_file:
-                write_png(target[i], tmp_file.name)
-                ex.add_artifact(tmp_file.name, os.path.join(path, "target", f"{image_count+i:04d}.png"))
-
-        image_count += input_.shape[0]
-
-
-def output_mask_overlay(epoch: int, image_count: int, input_: torch.Tensor, pred: torch.Tensor):
-    mask_BHW = get_mask(pred)
+    mask_BHW = get_mask(pred_BHW)
     red_mask_BCHW = mask_BHW.unsqueeze(1) * torch.tensor([1, 0, 0]).unsqueeze(-1).unsqueeze(-1).unsqueeze(0)
-    overlay_BCHW = input_
+    overlay_BCHW = input_BCHW
     overlay_BCHW[mask_BHW.bool().unsqueeze(1).repeat(1, 3, 1, 1)] *= 0.5
     overlay_BCHW += 0.5 * red_mask_BCHW
 
     for i, overlay_img in enumerate(overlay_BCHW):
         with tempfile.NamedTemporaryFile() as tmp_file:
             write_png((overlay_img * 255).byte(), tmp_file.name)
-            ex.add_artifact(tmp_file.name, os.path.join(f"epoch_{epoch}", "valid_patch_overlay", f"{image_count+i:04d}.png"))
+            ex.add_artifact(tmp_file.name, get_patch_overlay_dir(epoch, file_names[i]))
 
 
-def output_pixel_pred(epoch: int, image_count: int, pred: torch.Tensor):
-    pred_out = (pred.unsqueeze(1) * 255).byte().cpu()
-    for i, pred_img in enumerate(pred_out):
+def get_patch_overlay_dir(epoch: int, file_name: str | None = None):
+    if file_name is None:
+        return os.path.join(observer.dir, "validation", str(epoch), "patch_overlay")
+    else:
+        return os.path.join("validation", str(epoch), "patch_overlay", file_name)
+
+
+def output_pixel_pred(epoch: int, file_names: tuple[str], pred_BHW: torch.Tensor):
+    """Output the per-pixel predictions as images."""
+
+    pred_BHW = (pred_BHW.unsqueeze(1) * 255).byte().cpu()
+    for i, pred_img in enumerate(pred_BHW):
         with tempfile.NamedTemporaryFile() as tmp_file:
             write_png(pred_img, tmp_file.name)
-            ex.add_artifact(tmp_file.name, os.path.join(f"epoch_{epoch}", "valid_pixel_pred", f"{image_count+i:04d}.png"))
+            ex.add_artifact(tmp_file.name, get_pixel_pred_dir(epoch, file_names[i]))
+
+
+def get_pixel_pred_dir(epoch: int, file_name: str | None = None):
+    if file_name is None:
+        return os.path.join(observer.dir, "validation", str(epoch), "pixel_pred")
+    else:
+        return os.path.join("validation", str(epoch), "pixel_pred", file_name)
+
+
+def output_submission_file(model: BaseModel, test_loader: DataLoader):
+    """Given a model and data loader, output a submission file for the test set. It assumes that the
+    data loader does not contain targets."""
+
+    with open(os.path.join(observer.dir, "submission.csv"), "w") as f:
+        f.write("id,prediction\n")
+
+        for (input_BCHW, input_files) in test_loader:
+            input_BCHW = input_BCHW.to(DEVICE)
+            pred_BHW = model.predict(input_BCHW)
+            pred_patches_BMNPP = patchify(pred_BHW)
+            patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+
+            for i in range(patchwise_pred_BMN.shape[0]):
+                for x in range(patchwise_pred_BMN.shape[1]):
+                    for y in range(patchwise_pred_BMN.shape[2]):
+                        image_id = int(input_files[i].split("_")[-1].split(".")[0])
+                        f.write(f"{image_id:03d}_{x * 16}_{y * 16},{int(patchwise_pred_BMN[i, x, y])}\n")
 
 
 @ex.automain
-def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_stopping_config, output_images_every):
+def main(
+    model_name: str,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    is_pbar: bool,
+    is_early_stopping: bool,
+    early_stopping_config: dict,
+    output_images_every: int,
+    train_split: float,
+):
     transform = T.Compose([
         T.Resize((400, 400)),
     ])
 
     data = ImageSegmentationDataset("data/training/images", "data/training/groundtruth", normalize=True, transform=transform)
-    train_data, valid_data = random_split(data, [0.8, 0.2])
+    train_data, valid_data = random_split(data, [train_split, 1 - train_split])
     test_data = ImageSegmentationDataset("data/test/images", normalize=(data.channel_means, data.channel_stds), transform=transform)
 
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-
-    # Save validation data for analysis later
-    save_data(valid_loader, data.denormalize, "valid_data")
 
     model = create_model(model_name, { "pos_weight": data.pos_weight() })
     model.to(DEVICE)
@@ -122,40 +149,40 @@ def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_s
         # Training
         model.train()
         total_train_loss = 0
-        for (input_, target) in get_iterator(train_loader, leave=False):
+        for (input_BCHW, _, target_BHW, _) in get_iterator(train_loader, leave=False):
             model.zero_grad()
 
             # Forward pass
-            input_, target = input_.to(DEVICE), target.to(DEVICE)
-            pred = model.step(input_)
-            loss = model.loss(pred, target.to(DEVICE))
+            input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
+            pred_BHW = model.step(input_BCHW)
+            loss = model.loss(pred_BHW, target_BHW.to(DEVICE))
 
             # Compute gradient and update weights
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-            total_train_loss += loss.item() * input_.shape[0]
+            total_train_loss += loss.item() * input_BCHW.shape[0]
 
         # Predict validation images every `output_images_every`` epochs and save the images as artifacts
         if epoch % output_images_every == 0:
-            os.makedirs(os.path.join(observer.dir, f"epoch_{epoch}", "valid_pixel_pred"))
-            os.makedirs(os.path.join(observer.dir, f"epoch_{epoch}", "valid_patch_overlay"))
+            os.makedirs(get_pixel_pred_dir(epoch))
+            os.makedirs(get_patch_overlay_dir(epoch))
             image_count = 0
 
         # Validation
         model.eval()
         total_valid_score = 0
-        for (input_, target) in get_iterator(valid_loader, leave=False):
-            input_, target = input_.to(DEVICE), target.to(DEVICE)
-            pred = model.predict(input_)
-            score = eval_f1_score(pred, target)
-            total_valid_score += score.item() * input_.shape[0]
+        for (input_BCHW, input_files, target_BHW, _) in get_iterator(valid_loader, leave=False):
+            input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
+            pred_BHW = model.predict(input_BCHW)
+            score = eval_f1_score(pred_BHW, target_BHW)
+            total_valid_score += score.item() * input_BCHW.shape[0]
 
             if epoch % output_images_every == 0:
-                output_pixel_pred(epoch, image_count, pred)
-                output_mask_overlay(epoch, image_count, data.denormalize(input_), pred)
-                image_count += input_.shape[0]
+                output_pixel_pred(epoch, input_files, pred_BHW)
+                output_mask_overlay(epoch, input_files, data.denormalize(input_BCHW), pred_BHW)
+                image_count += input_BCHW.shape[0]
 
         train_loss = total_train_loss / len(train_data)
         valid_score = total_valid_score / len(valid_data)
@@ -177,13 +204,12 @@ def main(model_name, epochs, batch_size, lr, is_pbar, is_early_stopping, early_s
 
         if is_pbar:
             pbar.set_description(f"train loss: {train_loss:.4f}, valid score: {valid_score:.4f}")
-    
+
     # Save best model as an artifact, load model, and delete temporary file
     ex.add_artifact(model_tmp_file.name, "model.pth")
     model.load_state_dict(torch.load(model_tmp_file.name))
     model_tmp_file.close()
 
-    # Test
+    # Test and output submission file
     model.eval()
-
-    # TODO: Output submission file
+    output_submission_file(model, test_loader)
