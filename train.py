@@ -117,6 +117,8 @@ def main(
     output_images_every: int,
     train_split: float,
 ):
+    print(f"Device: {DEVICE}")
+
     transform = T.Compose([
         T.Resize((400, 400)),
     ])
@@ -178,6 +180,8 @@ def main(
             pred_BHW = model.predict(input_BCHW)
             score = eval_f1_score(pred_BHW, target_BHW)
             total_valid_score += score.item() * input_BCHW.shape[0]
+
+            input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
 
             if epoch % output_images_every == 0:
                 output_pixel_pred(epoch, input_files, pred_BHW)

@@ -165,3 +165,4 @@ experiments/
 temp/
 *.csv
 .DS_Store
+slurm*
