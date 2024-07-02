@@ -16,7 +16,7 @@ class UnetModel(BaseModel):
         self.model = Unet()
 
     def step(self, input_BCHW):
-        return self.model(input_BCHW).squeeze(-1)
+        return self.model(input_BCHW).squeeze(1)
 
     def loss(self, pred_BHW, target_BHW):
         # Do not use sigmoid in the model, because it is more numerically stable to use BCE with
@@ -24,7 +24,7 @@ class UnetModel(BaseModel):
         return F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.config["pos_weight"])
 
     def predict(self, input_BCHW):
-        return F.sigmoid(self.model(input_BCHW).squeeze(-1))
+        return F.sigmoid(self.model(input_BCHW).squeeze(1))
 
 
 class Unet(nn.Module):
