@@ -129,7 +129,7 @@ def main(
 
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
 
     model = create_model(model_name, { "pos_weight": data.pos_weight() })
     model.to(DEVICE)

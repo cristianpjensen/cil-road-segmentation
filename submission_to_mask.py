@@ -10,7 +10,7 @@ import os
 import sys
 from PIL import Image
 import numpy as np
-from constants import PATCH_SIZE, IMAGE_WIDTH, IMAGE_HEIGHT
+from src.constants import PATCH_SIZE, IMAGE_WIDTH, IMAGE_HEIGHT
 
 
 def main():

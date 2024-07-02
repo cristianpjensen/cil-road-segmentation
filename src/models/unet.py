@@ -28,34 +28,33 @@ class UnetModel(BaseModel):
 
 
 class Unet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=1, channels=[64, 128, 256, 512]):
+    def __init__(self, channels=[3, 64, 128, 256, 512, 1024]):
         super().__init__()
         enc_channels = channels
-        dec_channels = channels[::-1]
+        dec_channels = channels[::-1][:-1]
 
-        self.initial_conv = nn.Conv2d(in_channels, enc_channels[0], kernel_size=3, padding=1)
-        self.enc_blocks = nn.ModuleList([Block(in_channels, out_channels) for in_channels, out_channels in zip(enc_channels[:-1], enc_channels[1:])])
-        self.bottleneck = Block(enc_channels[-1], dec_channels[0])
-        self.dec_blocks = nn.ModuleList([Block(in_channels * 2, out_channels) for in_channels, out_channels in zip(dec_channels[:-1], dec_channels[1:])])
-        self.final_conv = nn.Conv2d(dec_channels[-1], out_channels, kernel_size=1)
+        self.enc_blocks = nn.ModuleList([Block(in_c, out_c) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
+        self.up_convs = nn.ModuleList([nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
+        self.dec_blocks = nn.ModuleList([Block(in_c, out_c) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
+        self.final_conv = nn.Conv2d(dec_channels[-1], 1, kernel_size=1)
 
         self.apply(self.init_weights)
 
     def forward(self, x):
-        x = self.initial_conv(x)
+        # Encoding
         enc_features = []
-        maxpool_indices = []
-        for block in self.enc_blocks:
-            x = block(x)
-            enc_features.append(x)
-            x, indices = F.max_pool2d(x, 2, return_indices=True)
-            maxpool_indices.append(indices)
+        for block in self.enc_blocks[:-1]:
+            x = block(x)  # pass through the block
+            enc_features.append(x)  # save features for skip connections
+            x = F.max_pool2d(x, kernel_size=2)
 
-        x = self.bottleneck(x)
+        # Bottleneck
+        x = self.enc_blocks[-1](x)
 
-        for block in self.dec_blocks:
-            x = F.max_unpool2d(x, maxpool_indices.pop(), 2)
-            x = torch.cat([x, enc_features.pop()], dim=1)
+        # Decoding
+        for block, up_conv, feature in zip(self.dec_blocks, self.up_convs, enc_features[::-1]):
+            x = up_conv(x)
+            x = torch.cat([x, feature], dim=1)
             x = block(x)
 
         return self.final_conv(x)
@@ -77,6 +76,7 @@ class Block(nn.Module):
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
+            nn.BatchNorm2d(out_channels),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
         )
