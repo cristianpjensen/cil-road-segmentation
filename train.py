@@ -10,11 +10,11 @@ from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from tqdm import tqdm
 
-from models.create_model import create_model
-from models.base import BaseModel
-from dataset import ImageSegmentationDataset
-from evaluation import eval_f1_score, get_mask, patchify
-from constants import DEVICE, FOREGROUND_THRESHOLD
+from src.models.create_model import create_model
+from src.models.base import BaseModel
+from src.dataset import ImageSegmentationDataset
+from src.evaluation import eval_f1_score, get_mask, patchify
+from src.constants import DEVICE, FOREGROUND_THRESHOLD
 
 # Get rid of warnings
 sacred.SETTINGS["CAPTURE_MODE"] = "sys"

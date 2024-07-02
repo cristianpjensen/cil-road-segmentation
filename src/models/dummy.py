@@ -5,7 +5,7 @@ a new model, make sure to update `create_model()` in `models/create_model.py` to
 model.
 """
 
-from models.base import BaseModel
+from .base import BaseModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

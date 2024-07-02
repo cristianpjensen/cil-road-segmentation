@@ -6,7 +6,7 @@ Suffix keys:
 """
 
 import torch
-from constants import FOREGROUND_THRESHOLD, PATCH_SIZE
+from .constants import FOREGROUND_THRESHOLD, PATCH_SIZE
 
 
 def patchify(x: torch.Tensor, patch_size=PATCH_SIZE) -> torch.Tensor:
