@@ -109,7 +109,7 @@ def main(
 
             # Forward pass
             input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
-            pred_BHW = model.step(input_BCHW)
+            pred_BHW = model.step(input_BCHW, epoch)
             loss = model.loss(pred_BHW, target_BHW.to(DEVICE))
 
             # Compute gradient and update weights

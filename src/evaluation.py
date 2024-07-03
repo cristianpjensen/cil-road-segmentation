@@ -43,12 +43,12 @@ def patch_f1_score(pred_BHW, target_BHW):
     patchwise_pred_BD = patchwise_pred_BMN.view(pred_BHW.shape[0], -1)
     patchwise_target_BD = patchwise_target_BMN.view(pred_BHW.shape[0], -1)
 
-    tp_B = (patchwise_pred_BD & patchwise_target_BD).float().sum(dim=1)
-    fp_B = (patchwise_pred_BD & ~patchwise_target_BD).float().sum(dim=1)
-    fn_B = (~patchwise_pred_BD & patchwise_target_BD).float().sum(dim=1)
-    f1_B = 2 * tp_B / (2 * tp_B + fp_B + fn_B)
+    tp = (patchwise_pred_BD & patchwise_target_BD).float().sum()
+    fp = (patchwise_pred_BD & ~patchwise_target_BD).float().sum()
+    fn = (~patchwise_pred_BD & patchwise_target_BD).float().sum()
+    f1 = 2 * tp / (2 * tp + fp + fn)
 
-    return f1_B.mean()
+    return f1
 
 
 def patch_accuracy(pred_BHW, target_BHW):

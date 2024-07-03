@@ -9,13 +9,26 @@ from .base import BaseModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 
 
 class UnetModel(BaseModel):
     def create_model(self):
         self.model = Unet()
 
-    def step(self, input_BCHW):
+    def step(self, input_BCHW, epoch):
+        # Flip determinstically per epoch
+        match epoch % 4:
+            case 1:
+                input_BCHW = TF.vflip(input_BCHW)
+            
+            case 2:
+                input_BCHW = TF.hflip(input_BCHW)
+
+            case 3:
+                input_BCHW = TF.vflip(input_BCHW)
+                input_BCHW = TF.hflip(input_BCHW)
+
         return self.model(input_BCHW).squeeze(1)
 
     def loss(self, pred_BHW, target_BHW):
