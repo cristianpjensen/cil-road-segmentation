@@ -130,24 +130,25 @@ def main(
         total_f1_score = 0
         total_patch_acc = 0
         total_pixel_acc = 0
-        for (input_BCHW, input_files, target_BHW, _) in get_iterator(valid_loader, leave=False):
-            input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
-            pred_BHW = model.predict(input_BCHW)
+        with torch.no_grad():
+            for (input_BCHW, input_files, target_BHW, _) in get_iterator(valid_loader, leave=False):
+                input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
+                pred_BHW = model.predict(input_BCHW)
 
-            # Compute metrics and keep track
-            f1_score = patch_f1_score(pred_BHW, target_BHW)
-            patch_acc = patch_accuracy(pred_BHW, target_BHW)
-            pixel_acc = pixel_accuracy(pred_BHW, target_BHW)
-            total_f1_score += f1_score.item() * input_BCHW.shape[0]
-            total_patch_acc += patch_acc.item() * input_BCHW.shape[0]
-            total_pixel_acc += pixel_acc.item() * input_BCHW.shape[0]
+                # Compute metrics and keep track
+                f1_score = patch_f1_score(pred_BHW, target_BHW)
+                patch_acc = patch_accuracy(pred_BHW, target_BHW)
+                pixel_acc = pixel_accuracy(pred_BHW, target_BHW)
+                total_f1_score += f1_score.item() * input_BCHW.shape[0]
+                total_patch_acc += patch_acc.item() * input_BCHW.shape[0]
+                total_pixel_acc += pixel_acc.item() * input_BCHW.shape[0]
 
-            input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
+                input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
 
-            if epoch % output_images_every == 0:
-                output_pixel_pred(ex, observer.dir, epoch, input_files, pred_BHW)
-                output_mask_overlay(ex, observer.dir, epoch, input_files, data.denormalize(input_BCHW), pred_BHW)
-                image_count += input_BCHW.shape[0]
+                if epoch % output_images_every == 0:
+                    output_pixel_pred(ex, observer.dir, epoch, input_files, pred_BHW)
+                    output_mask_overlay(ex, observer.dir, epoch, input_files, data.denormalize(input_BCHW), pred_BHW)
+                    image_count += input_BCHW.shape[0]
 
         train_loss = total_train_loss / len(train_data)
         valid_f1_score = total_f1_score / len(valid_data)
@@ -161,8 +162,8 @@ def main(
             no_improvement += 1
 
         # Save best model based on validation loss
-        if valid_f1_score > best_valid_score:
-            best_valid_score = valid_f1_score
+        if valid_patch_acc > best_valid_score:
+            best_valid_score = valid_patch_acc
             torch.save(model.state_dict(), model_tmp_file.name)
 
         # Log losses
@@ -181,4 +182,5 @@ def main(
 
     # Test and output submission file
     model.eval()
-    output_submission_file(observer.dir, model, test_loader)
+    with torch.no_grad():
+        output_submission_file(ex, observer.dir, model, test_loader)

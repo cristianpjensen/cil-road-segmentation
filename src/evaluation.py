@@ -128,9 +128,11 @@ def get_pixel_pred_dir(dir: str, epoch: int, file_name: str | None = None):
         return os.path.join("validation", str(epoch), "pixel_pred", file_name)
 
 
-def output_submission_file(dir: str, model: BaseModel, test_loader: DataLoader):
+def output_submission_file(ex: Experiment, dir: str, model: BaseModel, test_loader: DataLoader):
     """Given a model and data loader, output a submission file for the test set. It assumes that the
     data loader does not contain targets."""
+
+    os.makedirs(os.path.join(dir, "test"))
 
     with open(os.path.join(dir, "submission.csv"), "w") as f:
         f.write("id,prediction\n")
@@ -142,7 +144,13 @@ def output_submission_file(dir: str, model: BaseModel, test_loader: DataLoader):
             patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
 
             for i in range(patchwise_pred_BMN.shape[0]):
+                # Output prediction map
+                with tempfile.NamedTemporaryFile() as tmp_file:
+                    write_png((pred_BHW[i].unsqueeze(0) * 255).byte().cpu(), tmp_file.name)
+                    ex.add_artifact(tmp_file.name, os.path.join("test", input_files[i]))
+
+                # Add to submission file
                 for x in range(patchwise_pred_BMN.shape[1]):
                     for y in range(patchwise_pred_BMN.shape[2]):
                         image_id = int(input_files[i].split("_")[-1].split(".")[0])
-                        f.write(f"{image_id:03d}_{x * 16}_{y * 16},{int(patchwise_pred_BMN[i, x, y])}\n")
+                        f.write(f"{image_id:03d}_{y * PATCH_SIZE}_{x * PATCH_SIZE},{int(patchwise_pred_BMN[i, x, y])}\n")
