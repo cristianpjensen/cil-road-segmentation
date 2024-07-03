@@ -15,7 +15,7 @@ class DummyModel(BaseModel):
     def create_model(self):
         self.model = Dummy()
 
-    def step(self, input_BCHW, _):
+    def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
 
     def loss(self, pred_BHW, target_BHW):

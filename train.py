@@ -2,6 +2,7 @@ import os
 import tempfile
 import torch
 from torch.utils.data import DataLoader, random_split
+import torchvision.transforms.functional as TF
 import sacred
 from sacred.utils import apply_backspaces_and_linefeeds
 from sacred import Experiment
@@ -45,6 +46,7 @@ def config():
     }
     output_images_every = 10
     val_size = 10
+    deterministic_flip = True
 
 
 @ex.capture
@@ -64,6 +66,7 @@ def main(
     early_stopping_config: dict,
     output_images_every: int,
     val_size: int,
+    deterministic_flip: bool,
 ):
     print(f"Device: {DEVICE}")
 
@@ -107,9 +110,23 @@ def main(
         for (input_BCHW, _, target_BHW, _) in get_iterator(train_loader, leave=False):
             model.zero_grad()
 
+            if deterministic_flip:
+                match epoch % 4:
+                    case 1:
+                        input_BCHW = TF.hflip(input_BCHW)
+                        target_BHW = TF.hflip(target_BHW)
+                    case 2:
+                        input_BCHW = TF.vflip(input_BCHW)
+                        target_BHW = TF.vflip(target_BHW)
+                    case 3:
+                        input_BCHW = TF.hflip(input_BCHW)
+                        input_BCHW = TF.vflip(input_BCHW)
+                        target_BHW = TF.hflip(target_BHW)
+                        target_BHW = TF.vflip(target_BHW)
+
             # Forward pass
             input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
-            pred_BHW = model.step(input_BCHW, epoch)
+            pred_BHW = model.step(input_BCHW)
             loss = model.loss(pred_BHW, target_BHW.to(DEVICE))
 
             # Compute gradient and update weights

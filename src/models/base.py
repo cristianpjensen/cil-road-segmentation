@@ -18,7 +18,7 @@ class BaseModel(nn.Module):
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, input_BCHW: torch.Tensor, epoch: int) -> torch.Tensor:
+    def step(self, input_BCHW: torch.Tensor) -> torch.Tensor:
         """
         The output of this method will be passed to the loss method. The reason for two separate
         methods (`step` and `predict`) is that the outputs may be different. E.g., in the case of a

@@ -16,25 +16,13 @@ class UnetModel(BaseModel):
     def create_model(self):
         self.model = Unet()
 
-    def step(self, input_BCHW, epoch):
-        # Flip determinstically per epoch
-        match epoch % 4:
-            case 1:
-                input_BCHW = TF.vflip(input_BCHW)
-            
-            case 2:
-                input_BCHW = TF.hflip(input_BCHW)
-
-            case 3:
-                input_BCHW = TF.vflip(input_BCHW)
-                input_BCHW = TF.hflip(input_BCHW)
-
+    def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
 
     def loss(self, pred_BHW, target_BHW):
         # Do not use sigmoid in the model, because it is more numerically stable to use BCE with
         # logits, which combines the sigmoid and the BCE loss in a single function.
-        return F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
+        return F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.config["pos_weight"])
 
     def predict(self, input_BCHW):
         return F.sigmoid(self.model(input_BCHW).squeeze(1))
