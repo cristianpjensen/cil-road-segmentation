@@ -4,6 +4,7 @@ from torch.utils.data import Dataset
 from glob import glob
 from torchvision.io import read_image
 from torchvision.io import ImageReadMode
+import torchvision.transforms.functional as TF
 
 
 class ImageSegmentationDataset(Dataset):
@@ -20,13 +21,16 @@ class ImageSegmentationDataset(Dataset):
     """
 
     def __init__(
-            self,
-            input_dir: str,
-            target_dir=None,
-            normalize: bool | tuple[torch.Tensor, torch.Tensor] = False,
-            transform=lambda x: x,
-            target_transform=lambda x: x,
-        ):
+        self,
+        input_dir: str,
+        target_dir=None,
+        normalize: bool | tuple[torch.Tensor, torch.Tensor] = False,
+        size: tuple[int, int]=(400, 400),
+        transform=lambda x: x,
+        target_transform=lambda x: x,
+    ):
+        self.transform = transform
+        self.target_transform = target_transform
 
         # Save data in memory for faster access (dataset is small)
         self.file_names = self._get_image_files(input_dir)
@@ -38,7 +42,7 @@ class ImageSegmentationDataset(Dataset):
             self.target_file_names = None
             self.target_NHW = None
 
-        # Normalize input images
+        # Set normalization parameters
         match normalize:
             case True:
                 self.channel_means = torch.mean(self.input_NCHW, dim=[0, 2, 3], keepdim=True)
@@ -47,13 +51,14 @@ class ImageSegmentationDataset(Dataset):
             case (channel_means, channel_stds):
                 self.channel_means = channel_means
                 self.channel_stds = channel_stds
-        
+
+        # Normalize input images
         self.input_NCHW = self.normalize(self.input_NCHW)
 
-        # Transform immediately to save on redundant computation
-        self.input_NCHW = transform(self.input_NCHW)
+        # Resize
+        self.input_NCHW = TF.resize(self.input_NCHW, size)
         if self.target_NHW is not None:
-            self.target_NHW = target_transform(self.target_NHW)
+            self.target_NHW = TF.resize(self.target_NHW, size)
     
     def normalize(self, x):
         return (x - self.channel_means) / self.channel_stds
@@ -76,9 +81,14 @@ class ImageSegmentationDataset(Dataset):
 
     def __getitem__(self, item):
         if self.target_NHW is not None:
-            return self.input_NCHW[item], self.file_names[item], self.target_NHW[item], self.target_file_names[item]
+            return (
+                self.transform(self.input_NCHW[item]),
+                self.file_names[item],
+                self.target_transform(self.target_NHW[item]),
+                self.target_file_names[item],
+            )
 
-        return self.input_NCHW[item], self.file_names[item]
+        return self.transform(self.input_NCHW[item]), self.file_names[item]
 
     def __len__(self):
         return self.input_NCHW.shape[0]
