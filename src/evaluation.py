@@ -35,7 +35,7 @@ def depatchify(x: torch.Tensor) -> torch.Tensor:
     return x.transpose(-3, -2).flatten(-4, -3).flatten(-2, -1)
 
 
-def patch_f1_score(pred_BHW, target_BHW):
+def patch_f1_score(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
     pred_patches_BMNPP = patchify(pred_BHW)
     target_patches_BMNPP = patchify(target_BHW)
     patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
@@ -51,7 +51,7 @@ def patch_f1_score(pred_BHW, target_BHW):
     return f1
 
 
-def patch_accuracy(pred_BHW, target_BHW):
+def patch_accuracy(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
     pred_patches_BMNPP = patchify(pred_BHW)
     target_patches_BMNPP = patchify(target_BHW)
     patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
@@ -60,11 +60,11 @@ def patch_accuracy(pred_BHW, target_BHW):
     return (patchwise_pred_BMN == patchwise_target_BMN).float().mean()
 
 
-def pixel_accuracy(pred_BHW, target_BHW):
+def pixel_accuracy(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
     return (pred_BHW.round() == target_BHW.round()).float().mean()
 
 
-def get_mask(pred_BHW):
+def get_mask(pred_BHW: torch.Tensor) -> torch.Tensor:
     """
     Input: [B, H, W]
     Output: [B, H, W]

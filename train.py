@@ -47,6 +47,7 @@ def config():
     output_images_every = 10
     val_size = 10
     deterministic_flip = True
+    early_stopping_key = "valid_patch_acc"
 
 
 @ex.capture
@@ -67,6 +68,7 @@ def main(
     output_images_every: int,
     val_size: int,
     deterministic_flip: bool,
+    early_stopping_key: str,
 ):
     print(f"Device: {DEVICE}")
 
@@ -98,18 +100,28 @@ def main(
     # Create temporary file to save the best model while training
     model_tmp_file = tempfile.NamedTemporaryFile()
 
+    metrics = {
+        "train_loss": 0,
+        "valid_f1": 0,
+        "valid_patch_acc": 0,
+        "valid_pixel_acc": 0,
+    }
+
     pbar = get_iterator(range(epochs))
     for epoch in pbar:
         # Check for early stopping
         if no_improvement > early_stopping_config["patience"]:
             break
 
+        # Reset metrics
+        metrics = { k: 0 for k in metrics }
+
         # Training
         model.train()
-        total_train_loss = 0
         for (input_BCHW, _, target_BHW, _) in get_iterator(train_loader, leave=False):
             model.zero_grad()
 
+            # TODO: Re-implement as in https://arxiv.org/pdf/2404.00498
             if deterministic_flip:
                 match epoch % 4:
                     case 1:
@@ -134,7 +146,7 @@ def main(
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
 
-            total_train_loss += loss.item() * input_BCHW.shape[0]
+            metrics["train_loss"] += loss.item() * input_BCHW.shape[0]
 
         # Predict validation images every `output_images_every`` epochs and save the images as artifacts
         if epoch % output_images_every == 0:
@@ -144,54 +156,48 @@ def main(
 
         # Validation
         model.eval()
-        total_f1_score = 0
-        total_patch_acc = 0
-        total_pixel_acc = 0
         with torch.no_grad():
             for (input_BCHW, input_files, target_BHW, _) in get_iterator(valid_loader, leave=False):
                 input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
                 pred_BHW = model.predict(input_BCHW)
 
                 # Compute metrics and keep track
-                f1_score = patch_f1_score(pred_BHW, target_BHW)
-                patch_acc = patch_accuracy(pred_BHW, target_BHW)
-                pixel_acc = pixel_accuracy(pred_BHW, target_BHW)
-                total_f1_score += f1_score.item() * input_BCHW.shape[0]
-                total_patch_acc += patch_acc.item() * input_BCHW.shape[0]
-                total_pixel_acc += pixel_acc.item() * input_BCHW.shape[0]
+                metrics["valid_f1"] += patch_f1_score(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
+                metrics["valid_patch_acc"] += patch_accuracy(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
+                metrics["valid_pixel_acc"] += pixel_accuracy(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
 
-                input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
-
+                # Output images
                 if epoch % output_images_every == 0:
+                    input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
                     output_pixel_pred(ex, observer.dir, epoch, input_files, pred_BHW)
                     output_mask_overlay(ex, observer.dir, epoch, input_files, data.denormalize(input_BCHW), pred_BHW)
                     image_count += input_BCHW.shape[0]
 
-        train_loss = total_train_loss / len(train_data)
-        valid_f1_score = total_f1_score / len(valid_data)
-        valid_patch_acc = total_patch_acc / len(valid_data)
-        valid_pixel_acc = total_pixel_acc / len(valid_data)
+        # Normalize metrics
+        for k in metrics:
+            if "valid" in k:
+                metrics[k] /= len(valid_data)
+            if "train" in k:
+                metrics[k] /= len(train_data)
 
         # Early stopping
         if is_early_stopping:
-            if valid_patch_acc - best_valid_score > early_stopping_config["min_delta"]:
+            if metrics[early_stopping_key] - best_valid_score > early_stopping_config["min_delta"]:
                 no_improvement = 0
             else:
                 no_improvement += 1
 
         # Save best model based on validation loss
-        if valid_patch_acc > best_valid_score:
-            best_valid_score = valid_patch_acc
+        if metrics[early_stopping_key] > best_valid_score:
+            best_valid_score = metrics[early_stopping_key]
             torch.save(model.state_dict(), model_tmp_file.name)
 
-        # Log losses
-        ex.log_scalar("train_loss", train_loss)
-        ex.log_scalar("valid_f1", valid_f1_score)
-        ex.log_scalar("valid_patch_acc", valid_patch_acc)
-        ex.log_scalar("valid_pixel_acc", valid_pixel_acc)
+        # Log metrics
+        for k, v in metrics.items():
+            ex.log_scalar(k, v)
 
         if is_pbar:
-            pbar.set_description(f"train loss: {train_loss:.4f}, val f1: {valid_f1_score:.4f}, val patch acc: {valid_patch_acc:.4f}, val pixel acc: {valid_pixel_acc:.4f}")
+            pbar.set_description(", ".join([f"{k}: {v:.4f}" for k, v in metrics.items()]))
 
     # Save best model as an artifact, load model, and delete temporary file
     ex.add_artifact(model_tmp_file.name, "model.pth")

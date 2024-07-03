@@ -21,7 +21,7 @@ class UnetModel(BaseModel):
     def loss(self, pred_BHW, target_BHW):
         # Do not use sigmoid in the model, because it is more numerically stable to use BCE with
         # logits, which combines the sigmoid and the BCE loss in a single function.
-        return F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.config["pos_weight"])
+        return F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
 
     def predict(self, input_BCHW):
         return F.sigmoid(self.model(input_BCHW).squeeze(1))
