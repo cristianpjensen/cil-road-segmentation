@@ -9,7 +9,6 @@ from .base import BaseModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchvision.transforms.functional as TF
 
 
 class UnetModel(BaseModel):

@@ -101,7 +101,7 @@ def main(
     pbar = get_iterator(range(epochs))
     for epoch in pbar:
         # Check for early stopping
-        if is_early_stopping and no_improvement > early_stopping_config["patience"]:
+        if no_improvement > early_stopping_config["patience"]:
             break
 
         # Training
@@ -173,10 +173,11 @@ def main(
         valid_pixel_acc = total_pixel_acc / len(valid_data)
 
         # Early stopping
-        if is_early_stopping and valid_f1_score - best_valid_score > early_stopping_config["min_delta"]:
-            no_improvement = 0
-        else:
-            no_improvement += 1
+        if is_early_stopping:
+            if valid_patch_acc - best_valid_score > early_stopping_config["min_delta"]:
+                no_improvement = 0
+            else:
+                no_improvement += 1
 
         # Save best model based on validation loss
         if valid_patch_acc > best_valid_score:
