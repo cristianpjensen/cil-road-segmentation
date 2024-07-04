@@ -58,8 +58,8 @@ def get_iterator(iterator, is_pbar, **kwargs):
 
 
 @ex.capture
-def hash_fn(s: str, _seed: int) -> int:
-    return int(hashlib.md5(bytes(f"{s}{_seed}", "utf-8")).hexdigest()[-8:], 16)
+def hash_fn(s: str, seed: int) -> int:
+    return int(hashlib.md5(bytes(f"{s}{seed}", "utf-8")).hexdigest()[-8:], 16)
 
 
 def alternating_transforms(
@@ -73,7 +73,7 @@ def alternating_transforms(
     Output: [B, *, H, W]
     """
 
-    hashed_indices = torch.tensor([hash_fn(f) for f in indices])
+    hashed_indices = torch.tensor([hash_fn(i) for i in indices])
     flip_mask = ((hashed_indices + epoch) % len(transformations)) 
     flip_mask = flip_mask.view(flip_mask.shape + (1,) * (x_HW.dim() - flip_mask.dim()))
 
@@ -183,7 +183,7 @@ def main(
 
         # Training
         model.train()
-        for (input_BCHW, input_files, target_BHW, _) in get_iterator(train_loader, leave=False):
+        for (input_BCHW, input_files, target_B1HW, _) in get_iterator(train_loader, leave=False):
             model.zero_grad()
 
             # `altflip` generalized to vertical and horizontal flips, and rotations
@@ -191,12 +191,12 @@ def main(
             # file name, thus it is different for each image, but every N epochs, all transformed
             # versions will have been seen, where N is the number of transformation combinations
             input_BCHW = alternating_transforms(input_BCHW, input_files, transformations, epoch)
-            target_BHW = alternating_transforms(target_BHW, input_files, transformations, epoch)
+            target_B1HW = alternating_transforms(target_B1HW, input_files, transformations, epoch)
 
             # Forward pass
-            input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
+            input_BCHW, target_B1HW = input_BCHW.to(DEVICE), target_B1HW.to(DEVICE)
             pred_BHW = model.step(input_BCHW)
-            loss = model.loss(pred_BHW, target_BHW.squeeze(1))
+            loss = model.loss(pred_BHW, target_B1HW.squeeze(1))
 
             # Compute gradient and update weights
             loss.backward()
@@ -214,9 +214,9 @@ def main(
         # Validation
         model.eval()
         with torch.no_grad():
-            for (input_BCHW, input_files, target_BHW, _) in get_iterator(valid_loader, leave=False):
-                input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
-                target_BHW = target_BHW.squeeze(1)
+            for (input_BCHW, input_files, target_B1HW, _) in get_iterator(valid_loader, leave=False):
+                input_BCHW, target_B1HW = input_BCHW.to(DEVICE), target_B1HW.to(DEVICE)
+                target_BHW = target_B1HW.squeeze(1)
                 pred_BHW = model.predict(input_BCHW)
 
                 # Compute metrics and keep track
