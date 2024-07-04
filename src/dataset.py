@@ -73,8 +73,7 @@ class ImageSegmentationDataset(Dataset):
         image_tensors = []
         for file_name in file_names:
             im = read_image(os.path.join(dir, file_name), ImageReadMode.GRAY if is_target else ImageReadMode.RGB)
-            if not is_target:
-                im = im.unsqueeze(0)
+            im = im.unsqueeze(0)
             image_tensors.append(im)
 
         return torch.cat(image_tensors, dim=0).float()

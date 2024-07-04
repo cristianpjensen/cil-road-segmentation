@@ -9,6 +9,7 @@ from sacred.utils import apply_backspaces_and_linefeeds
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from tqdm import tqdm
+from functools import reduce
 
 from src.models.create_model import create_model
 from src.dataset import ImageSegmentationDataset
@@ -78,10 +79,26 @@ def alternating_transforms(
 
     # Apply transformations
     out_HW = x_HW.clone()
-    for i, transform in enumerate(transformations):
-        out_HW = torch.where(flip_mask == i, transform(out_HW), out_HW)
+    for i, transforms in enumerate(transformations):
+        out_HW = torch.where(flip_mask == i, compose_funcs(out_HW, transforms), out_HW)
 
     return out_HW
+
+
+def rotate90(img: torch.Tensor) -> torch.Tensor:
+    return TF.rotate(img, 90)
+
+
+def rotate180(img: torch.Tensor) -> torch.Tensor:
+    return TF.rotate(img, 180)
+
+
+def rotate270(img: torch.Tensor) -> torch.Tensor:
+    return TF.rotate(img, 270)
+
+
+def compose_funcs(obj, func_list):
+    return reduce(lambda o, func: func(o), func_list, obj)
 
 
 @ex.automain
@@ -103,18 +120,19 @@ def main(
         raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
 
     # Create all combinations of transformations
-    transformations = [lambda x: x]
+    transformations = [[]]
     if "v" in transforms:
-        transformations += [lambda x: TF.vflip(fn(x)) for fn in transformations]
+        transformations += [fns + [TF.vflip] for fns in transformations]
 
     if "h" in transforms:
-        transformations += [lambda x: TF.hflip(fn(x)) for fn in transformations]
+        transformations += [fns + [TF.hflip] for fns in transformations]
 
     if "r" in transforms:
         new_transformations = []
-        new_transformations += [lambda x: TF.rotate(fn(x), 90) for fn in transformations]
-        new_transformations += [lambda x: TF.rotate(fn(x), 180) for fn in transformations]
-        new_transformations += [lambda x: TF.rotate(fn(x), 270) for fn in transformations]
+        new_transformations += [fns + [rotate90] for fns in transformations]
+        new_transformations += [fns + [rotate180] for fns in transformations]
+        new_transformations += [fns + [rotate270] for fns in transformations]
+
         transformations += new_transformations
 
     print(f"Device: {DEVICE}")
@@ -178,7 +196,7 @@ def main(
             # Forward pass
             input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
             pred_BHW = model.step(input_BCHW)
-            loss = model.loss(pred_BHW, target_BHW)
+            loss = model.loss(pred_BHW, target_BHW.squeeze(1))
 
             # Compute gradient and update weights
             loss.backward()
@@ -198,6 +216,7 @@ def main(
         with torch.no_grad():
             for (input_BCHW, input_files, target_BHW, _) in get_iterator(valid_loader, leave=False):
                 input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
+                target_BHW = target_BHW.squeeze(1)
                 pred_BHW = model.predict(input_BCHW)
 
                 # Compute metrics and keep track
