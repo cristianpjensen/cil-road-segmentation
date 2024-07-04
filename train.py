@@ -158,7 +158,7 @@ def main(
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     best_valid_score = -float("inf")
     no_improvement = 0
