@@ -134,13 +134,11 @@ def main(
     transforms: str,
     early_stopping_key: str,
     activation: str,
+    residual: bool,
 ):
     # Config parsing
     if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
         raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
-
-    if activation not in ["relu", "gelu", "silu"]:
-        raise ValueError("Activation should be 'relu', 'gelu', or 'silu'.")
 
     print(f"Device: {DEVICE}")
 
@@ -161,7 +159,10 @@ def main(
     valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
 
-    model = create_model(model_name, { "pos_weight": data.pos_weight(), "activation": activation })
+    model = create_model(
+        model_name,
+        { "pos_weight": data.pos_weight(), "activation": activation, "residual": residual }
+    )
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
 

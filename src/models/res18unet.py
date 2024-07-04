@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class UnetModel(BaseModel):
+class Res18UnetModel(BaseModel):
     def create_model(self):
         match self.config["activation"]:
             case "relu":
@@ -16,7 +16,7 @@ class UnetModel(BaseModel):
             case _:
                 raise ValueError("Activation should be 'relu', 'gelu', or 'silu'.")
 
-        self.model = Unet(act_fn=act_fn)
+        self.model = Res18Unet(act_fn=act_fn)
 
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
@@ -30,15 +30,15 @@ class UnetModel(BaseModel):
         return F.sigmoid(self.model(input_BCHW).squeeze(1))
 
 
-class Unet(nn.Module):
+class Res18Unet(nn.Module):
     def __init__(self, channels=[3, 64, 128, 256, 512, 1024], act_fn=nn.ReLU):
         super().__init__()
         enc_channels = channels
         dec_channels = channels[::-1][:-1]
 
-        self.enc_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
+        self.enc_blocks = nn.ModuleList([Res18Block(in_c, out_c, act_fn) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
         self.up_convs = nn.ModuleList([nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
-        self.dec_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
+        self.dec_blocks = nn.ModuleList([Res18Block(in_c, out_c, act_fn) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
         self.final_conv = nn.Conv2d(dec_channels[-1], 1, kernel_size=1)
 
         self.apply(self.init_weights)
@@ -69,7 +69,7 @@ class Unet(nn.Module):
             m.bias.data.fill_(0.01)
 
 
-class Block(nn.Module):
+class Res18Block(nn.Module):
     """
     Input: [B, C_in, H, W]
     Output: [B, C_out, H, W]
@@ -79,19 +79,25 @@ class Block(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            act_fn(),
             nn.BatchNorm2d(out_channels),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             act_fn(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
         )
+        self.act = act_fn()
+
+        self.conv_skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+        ) if in_channels != out_channels else nn.Identity()
 
     def forward(self, x):
-        return self.block(x)
+        return self.act(self.block(x) + self.conv_skip(x))
 
 
 if __name__ == "__main__":
-    model = Unet(act_fn=nn.SiLU)
-    x = torch.randn((20, 3, 400, 400))
+    model = Res18Unet(act_fn=nn.ReLU)
+    x = torch.randn((5, 3, 400, 400))
     y: torch.Tensor = model(x)
 
     print("We want to make sure to initialize the model s.t. it preserves variance of the input.")
