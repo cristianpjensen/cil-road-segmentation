@@ -134,7 +134,6 @@ def main(
     transforms: str,
     early_stopping_key: str,
     activation: str,
-    residual: bool,
 ):
     # Config parsing
     if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
@@ -161,7 +160,7 @@ def main(
 
     model = create_model(
         model_name,
-        { "pos_weight": data.pos_weight(), "activation": activation, "residual": residual }
+        { "pos_weight": data.pos_weight(), "activation": activation }
     )
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
