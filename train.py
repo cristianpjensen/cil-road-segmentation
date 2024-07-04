@@ -62,20 +62,26 @@ def hash_fn(s: str, _seed: int) -> int:
 
 
 def alternating_transforms(
-    input_BCHW: torch.Tensor,
+    x_HW: torch.Tensor,
     indices: list[str],
     transformations: list[callable],
     epoch: int,
 ) -> torch.Tensor:
+    """
+    Input: [B, *, H, W]
+    Output: [B, *, H, W]
+    """
+
     hashed_indices = torch.tensor([hash_fn(f) for f in indices])
-    flip_mask = ((hashed_indices + epoch) % len(transformations)).view(-1, 1, 1, 1)
+    flip_mask = ((hashed_indices + epoch) % len(transformations)) 
+    flip_mask = flip_mask.view(flip_mask.shape + (1,) * (x_HW.dim() - flip_mask.dim()))
 
     # Apply transformations
-    out = input_BCHW.clone()
+    out_HW = x_HW.clone()
     for i, transform in enumerate(transformations):
-        out = torch.where(flip_mask == i, transform(out), out)
+        out_HW = torch.where(flip_mask == i, transform(out_HW), out_HW)
 
-    return out
+    return out_HW
 
 
 @ex.automain
@@ -172,7 +178,7 @@ def main(
             # Forward pass
             input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
             pred_BHW = model.step(input_BCHW)
-            loss = model.loss(pred_BHW, target_BHW.to(DEVICE))
+            loss = model.loss(pred_BHW, target_BHW)
 
             # Compute gradient and update weights
             loss.backward()
