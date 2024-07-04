@@ -50,6 +50,7 @@ def config():
     val_size = 10
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     early_stopping_key = "valid_patch_acc"
+    activation = "relu" # "relu", "gelu", or "silu"
 
 
 @ex.capture
@@ -97,8 +98,26 @@ def rotate270(img: torch.Tensor) -> torch.Tensor:
     return TF.rotate(img, 270)
 
 
-def compose_funcs(obj, func_list):
+def compose_funcs(obj, func_list: list[callable]):
     return reduce(lambda o, func: func(o), func_list, obj)
+
+
+def compose_transforms(transforms: str) -> list[list[callable]]:
+    transformations = [[]]
+    if "v" in transforms:
+        transformations += [fns + [TF.vflip] for fns in transformations]
+
+    if "h" in transforms:
+        transformations += [fns + [TF.hflip] for fns in transformations]
+
+    if "r" in transforms:
+        new_transformations = []
+        new_transformations += [fns + [rotate90] for fns in transformations]
+        new_transformations += [fns + [rotate180] for fns in transformations]
+        new_transformations += [fns + [rotate270] for fns in transformations]
+        transformations += new_transformations
+
+    return transformations
 
 
 @ex.automain
@@ -114,26 +133,14 @@ def main(
     val_size: int,
     transforms: str,
     early_stopping_key: str,
+    activation: str,
 ):
     # Config parsing
     if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
         raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
 
-    # Create all combinations of transformations
-    transformations = [[]]
-    if "v" in transforms:
-        transformations += [fns + [TF.vflip] for fns in transformations]
-
-    if "h" in transforms:
-        transformations += [fns + [TF.hflip] for fns in transformations]
-
-    if "r" in transforms:
-        new_transformations = []
-        new_transformations += [fns + [rotate90] for fns in transformations]
-        new_transformations += [fns + [rotate180] for fns in transformations]
-        new_transformations += [fns + [rotate270] for fns in transformations]
-
-        transformations += new_transformations
+    if activation not in ["relu", "gelu", "silu"]:
+        raise ValueError("Activation should be 'relu', 'gelu', or 'silu'.")
 
     print(f"Device: {DEVICE}")
 
@@ -154,7 +161,7 @@ def main(
     valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
 
-    model = create_model(model_name, { "pos_weight": data.pos_weight() })
+    model = create_model(model_name, { "pos_weight": data.pos_weight(), "activation": activation })
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
 
@@ -164,6 +171,9 @@ def main(
     no_improvement = 0
     # Create temporary file to save the best model while training
     model_tmp_file = tempfile.NamedTemporaryFile()
+    
+    # Data augmentation
+    transformations = compose_transforms(transforms)
 
     metrics = {
         "train_loss": 0,

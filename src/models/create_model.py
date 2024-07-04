@@ -8,7 +8,7 @@ def create_model(model: str, config: dict) -> BaseModel:
         case "dummy":
             return DummyModel(config)
 
-        case "relu-unet":
+        case "unet":
             return UnetModel(config)
 
         case _:

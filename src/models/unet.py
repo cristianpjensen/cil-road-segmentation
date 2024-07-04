@@ -13,7 +13,17 @@ import torch.nn.functional as F
 
 class UnetModel(BaseModel):
     def create_model(self):
-        self.model = Unet()
+        match self.config["activation"]:
+            case "relu":
+                act_fn = nn.ReLU
+            case "gelu":
+                act_fn = nn.GELU
+            case "silu":
+                act_fn = nn.SiLU
+            case _:
+                raise ValueError("Activation should be 'relu', 'gelu', or 'silu'.")
+
+        self.model = Unet(act_fn=act_fn)
 
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
@@ -28,14 +38,14 @@ class UnetModel(BaseModel):
 
 
 class Unet(nn.Module):
-    def __init__(self, channels=[3, 64, 128, 256, 512, 1024]):
+    def __init__(self, channels=[3, 64, 128, 256, 512, 1024], act_fn=nn.ReLU):
         super().__init__()
         enc_channels = channels
         dec_channels = channels[::-1][:-1]
 
-        self.enc_blocks = nn.ModuleList([Block(in_c, out_c) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
+        self.enc_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
         self.up_convs = nn.ModuleList([nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
-        self.dec_blocks = nn.ModuleList([Block(in_c, out_c) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
+        self.dec_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
         self.final_conv = nn.Conv2d(dec_channels[-1], 1, kernel_size=1)
 
         self.apply(self.init_weights)
@@ -71,14 +81,14 @@ class Block(nn.Module):
     Output: [B, C_out, H, W]
     """
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, act_fn=nn.ReLU):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
+            act_fn(),
             nn.BatchNorm2d(out_channels),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
+            act_fn(),
         )
 
     def forward(self, x):
