@@ -1,5 +1,6 @@
 import os
 import tempfile
+import hashlib
 import torch
 from torch.utils.data import DataLoader, random_split
 import torchvision.transforms.functional as TF
@@ -46,7 +47,7 @@ def config():
     }
     output_images_every = 10
     val_size = 10
-    deterministic_flip = True
+    transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     early_stopping_key = "valid_patch_acc"
 
 
@@ -54,6 +55,27 @@ def config():
 def get_iterator(iterator, is_pbar, **kwargs):
     return tqdm(iterator, **kwargs) if is_pbar else iterator
 
+
+@ex.capture
+def hash_fn(s: str, _seed: int) -> int:
+    return int(hashlib.md5(bytes(f"{s}{_seed}", "utf-8")).hexdigest()[-8:], 16)
+
+
+def alternating_transforms(
+    input_BCHW: torch.Tensor,
+    indices: list[str],
+    transformations: list[callable],
+    epoch: int,
+) -> torch.Tensor:
+    hashed_indices = torch.tensor([hash_fn(f) for f in indices])
+    flip_mask = ((hashed_indices + epoch) % len(transformations)).view(-1, 1, 1, 1)
+
+    # Apply transformations
+    out = input_BCHW.clone()
+    for i, transform in enumerate(transformations):
+        out = torch.where(flip_mask == i, transform(out), out)
+
+    return out
 
 
 @ex.automain
@@ -67,9 +89,28 @@ def main(
     early_stopping_config: dict,
     output_images_every: int,
     val_size: int,
-    deterministic_flip: bool,
+    transforms: str,
     early_stopping_key: str,
 ):
+    # Config parsing
+    if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
+        raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
+
+    # Create all combinations of transformations
+    transformations = [lambda x: x]
+    if "v" in transforms:
+        transformations += [lambda x: TF.vflip(fn(x)) for fn in transformations]
+
+    if "h" in transforms:
+        transformations += [lambda x: TF.hflip(fn(x)) for fn in transformations]
+
+    if "r" in transforms:
+        new_transformations = []
+        new_transformations += [lambda x: TF.rotate(fn(x), 90) for fn in transformations]
+        new_transformations += [lambda x: TF.rotate(fn(x), 180) for fn in transformations]
+        new_transformations += [lambda x: TF.rotate(fn(x), 270) for fn in transformations]
+        transformations += new_transformations
+
     print(f"Device: {DEVICE}")
 
     data = ImageSegmentationDataset(
@@ -118,23 +159,15 @@ def main(
 
         # Training
         model.train()
-        for (input_BCHW, _, target_BHW, _) in get_iterator(train_loader, leave=False):
+        for (input_BCHW, input_files, target_BHW, _) in get_iterator(train_loader, leave=False):
             model.zero_grad()
 
-            # TODO: Re-implement as in https://arxiv.org/pdf/2404.00498
-            if deterministic_flip:
-                match epoch % 4:
-                    case 1:
-                        input_BCHW = TF.hflip(input_BCHW)
-                        target_BHW = TF.hflip(target_BHW)
-                    case 2:
-                        input_BCHW = TF.vflip(input_BCHW)
-                        target_BHW = TF.vflip(target_BHW)
-                    case 3:
-                        input_BCHW = TF.hflip(input_BCHW)
-                        input_BCHW = TF.vflip(input_BCHW)
-                        target_BHW = TF.hflip(target_BHW)
-                        target_BHW = TF.vflip(target_BHW)
+            # `altflip` generalized to vertical and horizontal flips, and rotations
+            # (https://arxiv.org/pdf/2404.00498). The transformation depends on the epoch and the
+            # file name, thus it is different for each image, but every N epochs, all transformed
+            # versions will have been seen, where N is the number of transformation combinations
+            input_BCHW = alternating_transforms(input_BCHW, input_files, transformations, epoch)
+            target_BHW = alternating_transforms(target_BHW, input_files, transformations, epoch)
 
             # Forward pass
             input_BCHW, target_BHW = input_BCHW.to(DEVICE), target_BHW.to(DEVICE)
