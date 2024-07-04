@@ -6,6 +6,8 @@ from torchvision.io import read_image
 from torchvision.io import ImageReadMode
 import torchvision.transforms.functional as TF
 
+from .evaluation import patchify
+
 
 class ImageSegmentationDataset(Dataset):
     """Dataset for image segmentation tasks.
@@ -25,6 +27,7 @@ class ImageSegmentationDataset(Dataset):
         input_dir: str,
         target_dir=None,
         normalize: bool | tuple[torch.Tensor, torch.Tensor] = False,
+        target_is_patches: bool = False,
         size: tuple[int, int]=(400, 400),
         transform=lambda x: x,
         target_transform=lambda x: x,
@@ -59,6 +62,9 @@ class ImageSegmentationDataset(Dataset):
         self.input_NCHW = TF.resize(self.input_NCHW, size)
         if self.target_NHW is not None:
             self.target_NHW = TF.resize(self.target_NHW, size)
+
+        if target_is_patches and self.target_NHW is not None:
+            self.target_NHW = patchify(self.target_NHW).mean(dim=[-2, -1])
     
     def normalize(self, x):
         return (x - self.channel_means) / self.channel_stds

@@ -13,7 +13,7 @@ import torch.nn.functional as F
 
 class DummyModel(BaseModel):
     def create_model(self):
-        self.model = Dummy()
+        self.model = Dummy(patch_size=16 if self.config["predict_patches"] else 1)
 
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
@@ -28,9 +28,9 @@ class DummyModel(BaseModel):
 
 
 class Dummy(nn.Module):
-    def __init__(self):
+    def __init__(self, patch_size: int=1):
         super().__init__()
-        self.net = nn.Conv2d(3, 1, 1)
+        self.net = nn.Conv2d(3, 1, kernel_size=patch_size, stride=patch_size, padding=0)
 
     def forward(self, x):
         return self.net(x)

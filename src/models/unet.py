@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..constants import PATCH_SIZE
+
 
 class UnetModel(BaseModel):
     def create_model(self):
@@ -16,7 +18,7 @@ class UnetModel(BaseModel):
             case _:
                 raise ValueError("Activation should be 'relu', 'gelu', or 'silu'.")
 
-        self.model = Unet(act_fn=act_fn)
+        self.model = Unet(act_fn=act_fn, patch_size=PATCH_SIZE if self.config["predict_patches"] else 1)
 
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
@@ -31,7 +33,7 @@ class UnetModel(BaseModel):
 
 
 class Unet(nn.Module):
-    def __init__(self, channels=[3, 64, 128, 256, 512, 1024], act_fn=nn.ReLU):
+    def __init__(self, channels=[3, 64, 128, 256, 512, 1024], act_fn=nn.ReLU, patch_size=1):
         super().__init__()
         enc_channels = channels
         dec_channels = channels[::-1][:-1]
@@ -39,7 +41,10 @@ class Unet(nn.Module):
         self.enc_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
         self.up_convs = nn.ModuleList([nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
         self.dec_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
-        self.final_conv = nn.Conv2d(dec_channels[-1], 1, kernel_size=1)
+
+        # The final convolution has a patch size and stride of `patch_size`, such that we have a
+        # single prediction for each patch of size `patch_size` x `patch_size`.
+        self.final_conv = nn.Conv2d(dec_channels[-1], 1, kernel_size=patch_size, stride=patch_size, padding=0)
 
         self.apply(self.init_weights)
 

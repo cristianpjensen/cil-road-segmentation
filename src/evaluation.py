@@ -35,13 +35,17 @@ def depatchify(x: torch.Tensor) -> torch.Tensor:
     return x.transpose(-3, -2).flatten(-4, -3).flatten(-2, -1)
 
 
-def patch_f1_score(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
-    pred_patches_BMNPP = patchify(pred_BHW)
-    target_patches_BMNPP = patchify(target_BHW)
-    patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
-    patchwise_target_BMN = target_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
-    patchwise_pred_BD = patchwise_pred_BMN.view(pred_BHW.shape[0], -1)
-    patchwise_target_BD = patchwise_target_BMN.view(pred_BHW.shape[0], -1)
+def patch_f1_score(pred_BHW: torch.Tensor, target_BHW: torch.Tensor, is_patches: bool=False) -> torch.Tensor:
+    if not is_patches:
+        pred_patches_BMNPP = patchify(pred_BHW)
+        target_patches_BMNPP = patchify(target_BHW)
+        patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+        patchwise_target_BMN = target_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+        patchwise_pred_BD = patchwise_pred_BMN.view(pred_BHW.shape[0], -1)
+        patchwise_target_BD = patchwise_target_BMN.view(pred_BHW.shape[0], -1)
+    else:
+        patchwise_pred_BD = pred_BHW.round().bool().view(pred_BHW.shape[0], -1)
+        patchwise_target_BD = target_BHW.round().bool().view(pred_BHW.shape[0], -1)
 
     tp = (patchwise_pred_BD & patchwise_target_BD).float().sum()
     fp = (patchwise_pred_BD & ~patchwise_target_BD).float().sum()
@@ -51,11 +55,15 @@ def patch_f1_score(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Te
     return f1
 
 
-def patch_accuracy(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
-    pred_patches_BMNPP = patchify(pred_BHW)
-    target_patches_BMNPP = patchify(target_BHW)
-    patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
-    patchwise_target_BMN = target_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+def patch_accuracy(pred_BHW: torch.Tensor, target_BHW: torch.Tensor, is_patches: bool=False) -> torch.Tensor:
+    if not is_patches:
+        pred_patches_BMNPP = patchify(pred_BHW)
+        target_patches_BMNPP = patchify(target_BHW)
+        patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+        patchwise_target_BMN = target_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+    else:
+        patchwise_pred_BMN = pred_BHW.round()
+        patchwise_target_BMN = target_BHW.round()
 
     return (patchwise_pred_BMN == patchwise_target_BMN).float().mean()
 
@@ -64,14 +72,18 @@ def pixel_accuracy(pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Te
     return (pred_BHW.round() == target_BHW.round()).float().mean()
 
 
-def get_mask(pred_BHW: torch.Tensor) -> torch.Tensor:
+def get_mask(pred_BHW: torch.Tensor, is_patches: bool) -> torch.Tensor:
     """
     Input: [B, H, W]
     Output: [B, H, W]
     """
 
-    pred_patches_BMNPP = patchify(pred_BHW)
-    patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+    if not is_patches:
+        pred_patches_BMNPP = patchify(pred_BHW)
+        patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+    else:
+        patchwise_pred_BMN = pred_BHW.round()
+    
     mask_BHW = patchwise_pred_BMN.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
     return mask_BHW.float()
 
@@ -83,10 +95,11 @@ def output_mask_overlay(
     file_names: tuple[str],
     input_BCHW: torch.Tensor,
     pred_BHW: torch.Tensor,
+    is_patches: bool=False,
 ):
     """Output input images with the predicted patch-wise mask overlaid on top in red."""
 
-    mask_BHW = get_mask(pred_BHW)
+    mask_BHW = get_mask(pred_BHW, is_patches)
     red_mask_BCHW = mask_BHW.unsqueeze(1) * torch.tensor([1, 0, 0]).unsqueeze(-1).unsqueeze(-1).unsqueeze(0)
     overlay_BCHW = input_BCHW
     overlay_BCHW[mask_BHW.bool().unsqueeze(1).repeat(1, 3, 1, 1)] *= 0.5
@@ -111,8 +124,12 @@ def output_pixel_pred(
     epoch: int,
     file_names: tuple[str],
     pred_BHW: torch.Tensor,
+    is_patches: bool=False,
 ):
     """Output the per-pixel predictions as images."""
+
+    if is_patches:
+        pred_BHW = get_mask(pred_BHW, True)
 
     pred_BHW = (pred_BHW.unsqueeze(1) * 255).byte().cpu()
     for i, pred_img in enumerate(pred_BHW):
@@ -128,7 +145,7 @@ def get_pixel_pred_dir(dir: str, epoch: int, file_name: str | None = None):
         return os.path.join("validation", str(epoch), "pixel_pred", file_name)
 
 
-def output_submission_file(ex: Experiment, dir: str, model: BaseModel, test_loader: DataLoader):
+def output_submission_file(ex: Experiment, dir: str, model: BaseModel, test_loader: DataLoader, predict_patches: bool=False):
     """Given a model and data loader, output a submission file for the test set. It assumes that the
     data loader does not contain targets."""
 
@@ -140,8 +157,12 @@ def output_submission_file(ex: Experiment, dir: str, model: BaseModel, test_load
         for (input_BCHW, input_files) in test_loader:
             input_BCHW = input_BCHW.to(DEVICE)
             pred_BHW = model.predict(input_BCHW)
-            pred_patches_BMNPP = patchify(pred_BHW)
-            patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+            
+            if not predict_patches:
+                pred_patches_BMNPP = patchify(pred_BHW)
+                patchwise_pred_BMN = pred_patches_BMNPP.mean(dim=[-1, -2]) > FOREGROUND_THRESHOLD
+            else:
+                patchwise_pred_BMN = pred_BHW.round().bool()
 
             for i in range(patchwise_pred_BMN.shape[0]):
                 # Output prediction map

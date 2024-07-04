@@ -51,6 +51,7 @@ def config():
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     early_stopping_key = "valid_patch_acc"
     activation = "relu" # "relu", "gelu", or "silu"
+    predict_patches = False
 
 
 @ex.capture
@@ -134,6 +135,7 @@ def main(
     transforms: str,
     early_stopping_key: str,
     activation: str,
+    predict_patches: bool,
 ):
     # Config parsing
     if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
@@ -145,6 +147,7 @@ def main(
         "data/training/images",
         "data/training/groundtruth",
         normalize=True,
+        target_is_patches=predict_patches,
         size=(IMAGE_HEIGHT, IMAGE_WIDTH),
     )
     train_data, valid_data = random_split(data, [len(data) - val_size, val_size])
@@ -160,7 +163,7 @@ def main(
 
     model = create_model(
         model_name,
-        { "pos_weight": data.pos_weight(), "activation": activation }
+        { "pos_weight": data.pos_weight(), "activation": activation, "predict_patches": predict_patches }
     )
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
@@ -230,15 +233,15 @@ def main(
                 pred_BHW = model.predict(input_BCHW)
 
                 # Compute metrics and keep track
-                metrics["valid_f1"] += patch_f1_score(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
-                metrics["valid_patch_acc"] += patch_accuracy(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
+                metrics["valid_f1"] += patch_f1_score(pred_BHW, target_BHW, is_patches=predict_patches).item() * input_BCHW.shape[0]
+                metrics["valid_patch_acc"] += patch_accuracy(pred_BHW, target_BHW, is_patches=predict_patches).item() * input_BCHW.shape[0]
                 metrics["valid_pixel_acc"] += pixel_accuracy(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
 
                 # Output images
                 if epoch % output_images_every == 0:
                     input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
-                    output_pixel_pred(ex, observer.dir, epoch, input_files, pred_BHW)
-                    output_mask_overlay(ex, observer.dir, epoch, input_files, data.denormalize(input_BCHW), pred_BHW)
+                    output_pixel_pred(ex, observer.dir, epoch, input_files, pred_BHW, is_patches=predict_patches)
+                    output_mask_overlay(ex, observer.dir, epoch, input_files, data.denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
                     image_count += input_BCHW.shape[0]
 
         # Normalize metrics
@@ -275,4 +278,4 @@ def main(
     # Test and output submission file
     model.eval()
     with torch.no_grad():
-        output_submission_file(ex, observer.dir, model, test_loader)
+        output_submission_file(ex, observer.dir, model, test_loader, predict_patches)
