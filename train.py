@@ -36,7 +36,7 @@ ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 @ex.config
 def config():
-    model_name = "dummy"
+    model_name = "unet"
     epochs = 1000
     batch_size = 4
     lr = 1e-3
@@ -51,6 +51,7 @@ def config():
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     early_stopping_key = "valid_patch_acc"
     activation = "relu" # "relu", "gelu", or "silu"
+    block = "conv" # "conv", "res18", "res50", "resv2", or "resnext"
     predict_patches = False
 
 
@@ -135,6 +136,7 @@ def main(
     transforms: str,
     early_stopping_key: str,
     activation: str,
+    block: str,
     predict_patches: bool,
 ):
     # Config parsing
@@ -163,7 +165,12 @@ def main(
 
     model = create_model(
         model_name,
-        { "pos_weight": data.pos_weight(), "activation": activation, "predict_patches": predict_patches }
+        {
+            "pos_weight": data.pos_weight(),
+            "activation": activation,
+            "predict_patches": predict_patches,
+            "block": block,
+        }
     )
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")

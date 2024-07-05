@@ -2,6 +2,7 @@ from .base import BaseModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from abc import abstractmethod
 
 from ..constants import PATCH_SIZE
 
@@ -16,9 +17,25 @@ class UnetModel(BaseModel):
             case "silu":
                 act_fn = nn.SiLU
             case _:
-                raise ValueError("Activation should be 'relu', 'gelu', or 'silu'.")
+                raise ValueError(f"Activation function '{self.config['activation']}' not defined.")
 
-        self.model = Unet(act_fn=act_fn, patch_size=PATCH_SIZE if self.config["predict_patches"] else 1)
+        match self.config["block"]:
+            case "conv":
+                block = ConvBlock
+
+            case "res18":
+                block = Res18Block
+            
+            case "res50":
+                block = Res50Block
+
+            case "resv2":
+                block = ResV2Block
+
+            case _:
+                raise ValueError(f"Block '{self.config['block']}' not defined.")
+
+        self.model = Unet(act_fn=act_fn, block=block, patch_size=PATCH_SIZE if self.config["predict_patches"] else 1)
 
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
@@ -32,15 +49,108 @@ class UnetModel(BaseModel):
         return F.sigmoid(self.model(input_BCHW).squeeze(1))
 
 
-class Unet(nn.Module):
-    def __init__(self, channels=[3, 64, 128, 256, 512, 1024], act_fn=nn.ReLU, patch_size=1):
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, act_fn: nn.Module=nn.ReLU):
         super().__init__()
-        enc_channels = channels
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            act_fn(),
+            nn.BatchNorm2d(out_channels),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            act_fn(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.block(x)
+
+
+class Res18Block(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, act_fn: nn.Module=nn.ReLU):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            act_fn(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+        )
+        self.act = act_fn()
+
+        self.conv_skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+        ) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x):
+        return self.act(self.block(x) + self.conv_skip(x))
+
+
+class Res50Block(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, act_fn: nn.Module=nn.ReLU):
+        super().__init__()
+
+        bottleneck = in_channels // 4
+
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, bottleneck, kernel_size=1),
+            nn.BatchNorm2d(bottleneck),
+            act_fn(),
+            nn.Conv2d(bottleneck, bottleneck, kernel_size=3, padding=1),
+            nn.BatchNorm2d(bottleneck),
+            act_fn(),
+            nn.Conv2d(bottleneck, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+        )
+
+        self.conv_skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+        ) if in_channels != out_channels else nn.Identity()
+
+        self.act = act_fn()
+
+    def forward(self, x):
+        return self.act(self.block(x) + self.conv_skip(x))
+
+
+class ResV2Block(nn.Module):
+    def __init__(self, in_channels: int, out_channels: int, act_fn: nn.Module=nn.ReLU):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.BatchNorm2d(in_channels),
+            act_fn(),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            act_fn(),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+        )
+
+        self.conv_skip = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=1),
+            nn.BatchNorm2d(out_channels),
+        ) if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x):
+        return self.block(x) + self.conv_skip(x)
+
+
+class Unet(nn.Module):
+    def __init__(
+        self,
+        channels: list[int]=[3, 64, 128, 256, 512, 1024],
+        act_fn: nn.Module=nn.ReLU,
+        block: nn.Module=ConvBlock,
+        patch_size: int=1,
+    ):
+        super().__init__()
+        enc_channels = channels[1:]
         dec_channels = channels[::-1][:-1]
 
-        self.enc_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
+        # Use a normal convolution for the first layer, because we want to keep the number of channels
+        # a power of 2
+        self.enc_blocks = nn.ModuleList([ConvBlock(channels[0], channels[1], act_fn)] + [block(in_c, out_c, act_fn) for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])])
         self.up_convs = nn.ModuleList([nn.ConvTranspose2d(in_c, out_c, kernel_size=2, stride=2) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
-        self.dec_blocks = nn.ModuleList([Block(in_c, out_c, act_fn) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
+        self.dec_blocks = nn.ModuleList([block(in_c, out_c, act_fn) for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])])
 
         # The final convolution has a patch size and stride of `patch_size`, such that we have a
         # single prediction for each patch of size `patch_size` x `patch_size`.
@@ -74,28 +184,8 @@ class Unet(nn.Module):
             m.bias.data.fill_(0.01)
 
 
-class Block(nn.Module):
-    """
-    Input: [B, C_in, H, W]
-    Output: [B, C_out, H, W]
-    """
-
-    def __init__(self, in_channels, out_channels, act_fn=nn.ReLU):
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            act_fn(),
-            nn.BatchNorm2d(out_channels),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            act_fn(),
-        )
-
-    def forward(self, x):
-        return self.block(x)
-
-
 if __name__ == "__main__":
-    model = Unet(act_fn=nn.SiLU)
+    model = Unet()
     x = torch.randn((20, 3, 400, 400))
     y: torch.Tensor = model(x)
 
