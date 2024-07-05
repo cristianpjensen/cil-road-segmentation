@@ -1,6 +1,6 @@
 from .dummy import DummyModel
 from .base import BaseModel
-from .unet import UnetModel
+from .unet import UnetModel, NeighborUnetModel
 
 
 def create_model(model: str, config: dict) -> BaseModel:
@@ -10,6 +10,9 @@ def create_model(model: str, config: dict) -> BaseModel:
 
         case "unet":
             return UnetModel(config)
+
+        case "neighbor_unet":
+            return NeighborUnetModel(config)
 
         case _:
             ValueError(f"Unknown model: {model}")
