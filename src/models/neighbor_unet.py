@@ -26,7 +26,7 @@ class NeighborUnetModel(UnetModel):
         neighbor_target_BHW = F.conv2d(
             F.pad(pred_BHW, [pad, pad, pad, pad], mode="replicate").unsqueeze(1),
             self.neighbor_kernel,
-        ).squeeze(1)
+        ).squeeze(1).detach()
         neighbor_loss = F.mse_loss(pred_BHW, neighbor_target_BHW)
 
         return bce_loss + self.alpha * neighbor_loss
