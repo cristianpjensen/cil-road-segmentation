@@ -2,7 +2,6 @@ from .base import BaseModel
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from abc import abstractmethod
 
 from ..constants import PATCH_SIZE
 
@@ -132,33 +131,6 @@ class ResV2Block(nn.Module):
 
     def forward(self, x):
         return self.block(x) + self.conv_skip(x)
-
-
-class NeighborUnetModel(UnetModel):
-    def create_model(self, alpha=0.25):
-        self.model = Unet()
-        self.neighbor_kernel = torch.tensor([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-        self.alpha = alpha
-
-    def loss(self, pred_BHW, target_BHW):
-        # Do not use sigmoid in the model, because it is more numerically stable to use BCE with
-        # logits, which combines the sigmoid and the BCE loss in a single function.
-        bce_loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.config["pos_weight"])
-        
-        padded_preds_BHW = F.pad(pred_BHW, (1, 1, 1, 1), mode='constant', value=0).unsqueeze(1)
-        neighbor_sums_BHW = F.conv2d(padded_preds_BHW, self.neighbor_kernel).squeeze(1).squeeze(1)
-
-        # divide each sum by the number of neighbors
-        norm_map = torch.ones_like(neighbor_sums_BHW) * 8
-        norm_map[:, [0, -1], :] = 5  # top, bottom edges
-        norm_map[:, :, [0, -1]] = 5  # left, right edges
-        norm_map[:, [0, -1], [0, -1]] = 3  # corners
-        norm_map.repeat(4, 1, 1)
-        neighbor_means_BHW = neighbor_sums_BHW / norm_map
-
-        neighbor_loss = F.mse_loss(pred_BHW, neighbor_means_BHW)
-
-        return bce_loss + self.alpha * neighbor_loss
 
 
 class Unet(nn.Module):

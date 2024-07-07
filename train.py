@@ -36,7 +36,16 @@ ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 @ex.config
 def config():
-    model_name = "unet"
+    model_name = "unet" # "dummy", "unet", "neighbor_unet"
+    model_config = {
+        # Configuration specific to U-nets
+        "activation": "relu", # "relu", "gelu", "silu"
+        "block": "conv", # "conv", "res18", "res50", "resv2"
+
+        # Configuration specific to model_name="neighbor_unet"
+        "neighbor_kernel_size": 3,
+        "neighbor_loss_weight": 0.1,
+    }
     epochs = 1000
     batch_size = 4
     lr = 1e-3
@@ -50,8 +59,6 @@ def config():
     val_size = 10
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     early_stopping_key = "valid_patch_acc"
-    activation = "relu" # "relu", "gelu", or "silu"
-    block = "conv" # "conv", "res18", "res50", "resv2", or "resnext"
     predict_patches = False
 
 
@@ -125,6 +132,7 @@ def compose_transforms(transforms: str) -> list[list[callable]]:
 @ex.automain
 def main(
     model_name: str,
+    model_config: dict,
     epochs: int,
     batch_size: int,
     lr: float,
@@ -135,8 +143,6 @@ def main(
     val_size: int,
     transforms: str,
     early_stopping_key: str,
-    activation: str,
-    block: str,
     predict_patches: bool,
 ):
     # Config parsing
@@ -166,10 +172,9 @@ def main(
     model = create_model(
         model_name,
         {
+            **model_config,
             "pos_weight": data.pos_weight(),
-            "activation": activation,
             "predict_patches": predict_patches,
-            "block": block,
         }
     )
     model.to(DEVICE)

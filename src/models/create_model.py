@@ -1,6 +1,7 @@
 from .dummy import DummyModel
 from .base import BaseModel
-from .unet import UnetModel, NeighborUnetModel
+from .unet import UnetModel
+from .neighbor_unet import NeighborUnetModel
 
 
 def create_model(model: str, config: dict) -> BaseModel:
