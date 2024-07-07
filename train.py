@@ -1,15 +1,13 @@
 import os
 import tempfile
-import hashlib
 import torch
 from torch.utils.data import DataLoader, random_split
-import torchvision.transforms.functional as TF
 import sacred
 from sacred.utils import apply_backspaces_and_linefeeds
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from tqdm import tqdm
-from functools import reduce
+from src.augmentation import alternating_transforms, compose_transforms
 
 from src.models.create_model import create_model
 from src.dataset import ImageSegmentationDataset
@@ -67,70 +65,9 @@ def get_iterator(iterator, is_pbar, **kwargs):
     return tqdm(iterator, **kwargs) if is_pbar else iterator
 
 
-@ex.capture
-def hash_fn(s: str, seed: int) -> int:
-    return int(hashlib.md5(bytes(f"{s}{seed}", "utf-8")).hexdigest()[-8:], 16)
-
-
-def alternating_transforms(
-    x_HW: torch.Tensor,
-    indices: list[str],
-    transformations: list[callable],
-    epoch: int,
-) -> torch.Tensor:
-    """
-    Input: [B, *, H, W]
-    Output: [B, *, H, W]
-    """
-
-    hashed_indices = torch.tensor([hash_fn(i) for i in indices])
-    flip_mask = ((hashed_indices + epoch) % len(transformations)) 
-    flip_mask = flip_mask.view(flip_mask.shape + (1,) * (x_HW.dim() - flip_mask.dim()))
-
-    # Apply transformations
-    out_HW = x_HW.clone()
-    for i, transforms in enumerate(transformations):
-        out_HW = torch.where(flip_mask == i, compose_funcs(out_HW, transforms), out_HW)
-
-    return out_HW
-
-
-def rotate90(img: torch.Tensor) -> torch.Tensor:
-    return TF.rotate(img, 90)
-
-
-def rotate180(img: torch.Tensor) -> torch.Tensor:
-    return TF.rotate(img, 180)
-
-
-def rotate270(img: torch.Tensor) -> torch.Tensor:
-    return TF.rotate(img, 270)
-
-
-def compose_funcs(obj, func_list: list[callable]):
-    return reduce(lambda o, func: func(o), func_list, obj)
-
-
-def compose_transforms(transforms: str) -> list[list[callable]]:
-    transformations = [[]]
-    if "v" in transforms:
-        transformations += [fns + [TF.vflip] for fns in transformations]
-
-    if "h" in transforms:
-        transformations += [fns + [TF.hflip] for fns in transformations]
-
-    if "r" in transforms:
-        new_transformations = []
-        new_transformations += [fns + [rotate90] for fns in transformations]
-        new_transformations += [fns + [rotate180] for fns in transformations]
-        new_transformations += [fns + [rotate270] for fns in transformations]
-        transformations += new_transformations
-
-    return transformations
-
-
 @ex.automain
 def main(
+    seed: int,
     model_name: str,
     model_config: dict,
     epochs: int,
@@ -215,8 +152,8 @@ def main(
             # (https://arxiv.org/pdf/2404.00498). The transformation depends on the epoch and the
             # file name, thus it is different for each image, but every N epochs, all transformed
             # versions will have been seen, where N is the number of transformation combinations
-            input_BCHW = alternating_transforms(input_BCHW, input_files, transformations, epoch)
-            target_B1HW = alternating_transforms(target_B1HW, input_files, transformations, epoch)
+            input_BCHW = alternating_transforms(input_BCHW, input_files, transformations, epoch, seed)
+            target_B1HW = alternating_transforms(target_B1HW, input_files, transformations, epoch, seed)
 
             # Forward pass
             input_BCHW, target_B1HW = input_BCHW.to(DEVICE), target_B1HW.to(DEVICE)
