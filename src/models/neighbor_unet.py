@@ -12,7 +12,7 @@ class NeighborUnetModel(UnetModel):
         self.neighbor_size = self.config.get("neighbor_kernel_size", 3)
         self.alpha = self.config.get("neighbor_loss_weight", 0.1)
 
-        # Define loss kernel
+        # Define neighborhood loss kernel
         self.neighbor_kernel = torch.ones((self.neighbor_size, self.neighbor_size), dtype=torch.float32)
         self.neighbor_kernel[self.neighbor_size // 2, self.neighbor_size // 2] = 0
         self.neighbor_kernel /= self.neighbor_kernel.sum()
