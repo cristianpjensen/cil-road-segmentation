@@ -34,7 +34,7 @@ ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 @ex.config
 def config():
-    model_name = "unet" # "dummy", "unet", "neighbor_unet"
+    model_name = "unet" # "dummy", "unet", "neighbor_unet", "unet++"
     model_config = {
         # Configuration specific to U-nets
         "activation": "relu", # "relu", "gelu", "silu"
@@ -43,6 +43,9 @@ def config():
         # Configuration specific to model_name="neighbor_unet"
         "neighbor_kernel_size": 3,
         "neighbor_loss_weight": 0.1,
+
+        # Configuration specific to model_name="unet++"
+        "deep_supervision": False,
     }
     epochs = 1000
     batch_size = 4
