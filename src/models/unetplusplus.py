@@ -96,7 +96,7 @@ class UnetPlusPlus(nn.Module):
                 xs[i][j] = self.convs[i][j](torch.cat(skip_connections, dim=1))
 
         # Finally the dense layer that make the prediction per pixel/patch
-        return torch.stack([final_conv(xs[0][i]) for i, final_conv in enumerate(self.final_convs)], dim=1)
+        return torch.stack([final_conv(xs[0][self.N - 1 - i]) for i, final_conv in enumerate(self.final_convs)], dim=1)
 
     def init_weights(self, m):
         if isinstance(m, nn.Conv2d):
