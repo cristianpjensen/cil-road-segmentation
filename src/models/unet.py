@@ -70,11 +70,14 @@ class Unet(nn.Module):
             for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])
         ])
 
-        self.pos_enc = PosEnc(channels[-1], max_len=(400 // 2**(len(channels)-1)) ** 2)
-        self.bottleneck = nn.ModuleList([
-            nn.MultiheadAttention(channels[-1], num_heads, batch_first=True)
-            for _ in range(bottleneck_mhsa_layers)
-        ])
+        if bottleneck_mhsa_layers > 0:
+            transformer_layer = nn.TransformerEncoderLayer(channels[-1], num_heads, dim_feedforward=channels[-1] * 2, batch_first=True)
+            self.bottleneck = nn.Sequential(
+                PosEnc(channels[-1], max_len=(400 // 2**(len(channels)-1)) ** 2),
+                nn.TransformerEncoder(transformer_layer, bottleneck_mhsa_layers),
+            )
+        else:
+            self.bottleneck = None
 
         # The final convolution has a patch size and stride of `patch_size`, such that we have a
         # single prediction for each patch of size `patch_size` x `patch_size`.
@@ -89,13 +92,10 @@ class Unet(nn.Module):
             x = F.max_pool2d(x, kernel_size=2)
             x = block(x)
         
-        # Bottleneck
-        if len(self.bottleneck) > 0:
+        # MHSA bottleneck
+        if self.bottleneck is not None:
             x_bot = x.reshape(x.shape[0], x.shape[1], -1).transpose(1, 2)
-            x_bot = self.pos_enc(x_bot)
-            for mhsa in self.bottleneck:
-                x_bot, _ = mhsa(x_bot, x_bot, x_bot)
-
+            x_bot = self.bottleneck(x_bot)
             x = x_bot.transpose(1, 2).reshape_as(x)
 
         # Decoding

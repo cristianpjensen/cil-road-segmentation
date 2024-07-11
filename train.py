@@ -41,7 +41,7 @@ def config():
         "block": "conv", # "conv", "res18", "res50", "resv2"
         "channels": [64, 128, 256, 512, 1024],
         "bottleneck_mhsa_layers": 0,
-        "num_heads": 1,
+        "num_heads": 8,
 
         # Configuration specific to model_name="neighbor_unet"
         "neighbor_unet": {
