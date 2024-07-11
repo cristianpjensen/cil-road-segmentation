@@ -100,4 +100,8 @@ class ImageSegmentationDataset(Dataset):
 
     def pos_weight(self):
         """Negative / positive occurrence ratio."""
-        return (1 - self.target_NHW).sum() / self.target_NHW.sum()
+
+        if self.target_NHW is not None:
+            return (1 - self.target_NHW).sum() / self.target_NHW.sum()
+
+        return None

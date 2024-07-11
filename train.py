@@ -39,13 +39,20 @@ def config():
         # Configuration specific to U-nets
         "activation": "relu", # "relu", "gelu", "silu"
         "block": "conv", # "conv", "res18", "res50", "resv2"
+        "channels": [64, 128, 256, 512, 1024],
+        "bottleneck_mhsa_layers": 0,
+        "num_heads": 1,
 
         # Configuration specific to model_name="neighbor_unet"
-        "neighbor_kernel_size": 3,
-        "neighbor_loss_weight": 0.1,
+        "neighbor_unet": {
+            "neighbor_kernel_size": 3,
+            "neighbor_loss_weight": 0.1,
+        },
 
         # Configuration specific to model_name="unet++"
-        "deep_supervision": False,
+        "unetplusplus": {
+            "deep_supervision": False,
+        }
     }
     epochs = 1000
     batch_size = 4

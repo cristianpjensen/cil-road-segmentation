@@ -14,11 +14,16 @@ class UnetPlusPlusModel(BaseModel):
         act_fn = ACTIVATIONS[self.config["activation"]]
         block = BLOCKS[self.config["block"]]
         self.model = UnetPlusPlus(
+            channels=self.config["channels"],
             act_fn=act_fn,
             block=block,
             patch_size=PATCH_SIZE if self.config["predict_patches"] else 1,
-            deep_supervision=self.config["deep_supervision"],
+            deep_supervision=self.config["unetplusplus"]["deep_supervision"],
         )
+
+        # Residual layers should not be initialized with Kaiming normal
+        if self.config["block"] == "conv":
+            self.model.apply(init_weights)
 
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(2).mean(1)
@@ -71,14 +76,13 @@ class UnetPlusPlus(nn.Module):
 
         if deep_supervision:
             self.final_convs = nn.ModuleList([
-                nn.Conv2d(channels[0], out_channels, kernel_size=patch_size, stride=patch_size, padding=0) for _ in range(self.N - 1)
+                nn.Conv2d(channels[0], out_channels, kernel_size=patch_size, stride=patch_size, padding=0)
+                for _ in range(self.N - 1)
             ])
         else:
             self.final_convs = nn.ModuleList([
                 nn.Conv2d(channels[0], out_channels, kernel_size=patch_size, stride=patch_size, padding=0)
             ])
-
-        self.apply(self.init_weights)
 
     def forward(self, x):
         xs = [[None for _ in range(self.N - i)] for i in range(self.N)]
@@ -98,7 +102,8 @@ class UnetPlusPlus(nn.Module):
         # Finally the dense layer that make the prediction per pixel/patch
         return torch.stack([final_conv(xs[0][self.N - 1 - i]) for i, final_conv in enumerate(self.final_convs)], dim=1)
 
-    def init_weights(self, m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight)
-            m.bias.data.fill_(0.01)
+
+def init_weights(m):
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight)
+        m.bias.data.fill_(0.01)
