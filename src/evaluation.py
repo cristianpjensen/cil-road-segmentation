@@ -90,6 +90,7 @@ def get_mask(pred_BHW: torch.Tensor, is_patches: bool) -> torch.Tensor:
 
 def output_mask_overlay(
     ex: Experiment,
+    ex_dir: str,
     dir: str,
     epoch: int,
     file_names: tuple[str],
@@ -108,18 +109,19 @@ def output_mask_overlay(
     for i, overlay_img in enumerate(overlay_BCHW):
         with tempfile.NamedTemporaryFile() as tmp_file:
             write_png((overlay_img * 255).byte(), tmp_file.name)
-            ex.add_artifact(tmp_file.name, get_patch_overlay_dir(dir, epoch, file_names[i]))
+            ex.add_artifact(tmp_file.name, get_patch_overlay_dir(ex_dir, dir, epoch, file_names[i]))
 
 
-def get_patch_overlay_dir(dir: str, epoch: int, file_name: str | None = None):
+def get_patch_overlay_dir(ex_dir: str, dir: str, epoch: int, file_name: str | None = None):
     if file_name is None:
-        return os.path.join(dir, "validation", str(epoch), "patch_overlay")
+        return os.path.join(ex_dir, f"{dir}_valid", str(epoch), "patch_overlay")
     else:
-        return os.path.join("validation", str(epoch), "patch_overlay", file_name)
+        return os.path.join(f"{dir}_valid", str(epoch), "patch_overlay", file_name)
 
 
 def output_pixel_pred(
     ex: Experiment,
+    ex_dir: str,
     dir: str,
     epoch: int,
     file_names: tuple[str],
@@ -135,14 +137,14 @@ def output_pixel_pred(
     for i, pred_img in enumerate(pred_BHW):
         with tempfile.NamedTemporaryFile() as tmp_file:
             write_png(pred_img, tmp_file.name)
-            ex.add_artifact(tmp_file.name, get_pixel_pred_dir(dir, epoch, file_names[i]))
+            ex.add_artifact(tmp_file.name, get_pixel_pred_dir(ex_dir, dir, epoch, file_names[i]))
 
 
-def get_pixel_pred_dir(dir: str, epoch: int, file_name: str | None = None):
+def get_pixel_pred_dir(ex_dir: str, dir: str, epoch: int, file_name: str | None = None):
     if file_name is None:
-        return os.path.join(dir, "validation", str(epoch), "pixel_pred")
+        return os.path.join(ex_dir, f"{dir}_valid", str(epoch), "pixel_pred")
     else:
-        return os.path.join("validation", str(epoch), "pixel_pred", file_name)
+        return os.path.join(f"{dir}_valid", str(epoch), "pixel_pred", file_name)
 
 
 def output_submission_file(ex: Experiment, dir: str, model: BaseModel, test_loader: DataLoader, predict_patches: bool=False):

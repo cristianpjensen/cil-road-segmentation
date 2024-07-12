@@ -1,6 +1,7 @@
 import os
 import tempfile
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import sacred
 from sacred.utils import apply_backspaces_and_linefeeds
@@ -34,7 +35,9 @@ ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 @ex.config
 def config():
-    model_name = "unet" # "dummy", "unet", "neighbor_unet", "unet++"
+    final_data_dir = "data"
+    pretrain_data_dir = None
+    model_name = "dummy" # "dummy", "unet", "neighbor_unet", "unet++"
     model_config = {
         # Configuration specific to U-nets
         "activation": "relu", # "relu", "gelu", "silu"
@@ -75,68 +78,44 @@ def get_iterator(iterator, is_pbar, **kwargs):
     return tqdm(iterator, **kwargs) if is_pbar else iterator
 
 
-@ex.automain
-def main(
-    seed: int,
-    model_name: str,
-    model_config: dict,
-    epochs: int,
+def train(
+    model: nn.Module,
+    name: str,
+    train_data: torch.utils.data.Dataset,
+    valid_data: torch.utils.data.Dataset,
     batch_size: int,
-    lr: float,
-    is_pbar: bool,
-    is_early_stopping: bool,
-    early_stopping_config: dict,
-    output_images_every: int,
-    val_size: int,
-    transforms: str,
-    early_stopping_key: str,
-    predict_patches: bool,
+    optimizer: torch.optim.Optimizer,
+    transforms: list[str],
+    seed: int,
+    denormalize: callable,
+    output_val_images_every: int=10,
+    epochs: int=1000,
+    patience: int=50,
+    min_delta: float=1e-4,
+    early_stopping_key: str="valid_patch_acc",
+    predict_patches: bool=False,
+    is_pbar: bool=True,
 ):
-    # Config parsing
-    if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
-        raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
+    """Training loop with early stopping and data augmentation. Furthermore, we allow for predicting
+    patches. Outputs the final model weights with file name `model_<name>.pt` in the experiment
+    directory."""
 
-    print(f"Device: {DEVICE}")
-
-    data = ImageSegmentationDataset(
-        "data/training/images",
-        "data/training/groundtruth",
-        normalize=True,
-        target_is_patches=predict_patches,
-        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
-    )
-    train_data, valid_data = random_split(data, [len(data) - val_size, val_size])
-    test_data = ImageSegmentationDataset(
-        "data/test/images",
-        normalize=(data.channel_means, data.channel_stds),
-        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
-    )
-
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
-
-    model = create_model(
-        model_name,
-        {
-            **model_config,
-            "pos_weight": data.pos_weight(),
-            "predict_patches": predict_patches,
-        }
-    )
-    model.to(DEVICE)
-    print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-
-    best_valid_score = -float("inf")
-    no_improvement = 0
     # Create temporary file to save the best model while training
     model_tmp_file = tempfile.NamedTemporaryFile()
+
+    # Data loaders
+    train_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     
     # Data augmentation
     transformations = compose_transforms(transforms)
 
+    # Early stopping variables
+    best_valid_score = -float("inf")
+    no_improvement = 0
+
+    # Metrics to be kept track of. Make sure all metrics contain either train or valid, such that
+    # they are normalized appropriately.
     metrics = {
         "train_loss": 0,
         "valid_f1": 0,
@@ -147,7 +126,7 @@ def main(
     pbar = get_iterator(range(epochs))
     for epoch in pbar:
         # Check for early stopping
-        if no_improvement > early_stopping_config["patience"]:
+        if no_improvement > patience:
             break
 
         # Reset metrics
@@ -178,9 +157,9 @@ def main(
             metrics["train_loss"] += loss.item() * input_BCHW.shape[0]
 
         # Predict validation images every `output_images_every`` epochs and save the images as artifacts
-        if epoch % output_images_every == 0:
-            os.makedirs(get_pixel_pred_dir(observer.dir, epoch))
-            os.makedirs(get_patch_overlay_dir(observer.dir, epoch))
+        if epoch % output_val_images_every == 0:
+            os.makedirs(get_pixel_pred_dir(observer.dir, name, epoch))
+            os.makedirs(get_patch_overlay_dir(observer.dir, name, epoch))
             image_count = 0
 
         # Validation
@@ -197,10 +176,10 @@ def main(
                 metrics["valid_pixel_acc"] += pixel_accuracy(pred_BHW, target_BHW).item() * input_BCHW.shape[0]
 
                 # Output images
-                if epoch % output_images_every == 0:
+                if epoch % output_val_images_every == 0:
                     input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
-                    output_pixel_pred(ex, observer.dir, epoch, input_files, pred_BHW, is_patches=predict_patches)
-                    output_mask_overlay(ex, observer.dir, epoch, input_files, data.denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
+                    output_pixel_pred(ex, observer.dir, name, epoch, input_files, pred_BHW, is_patches=predict_patches)
+                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
                     image_count += input_BCHW.shape[0]
 
         # Normalize metrics
@@ -211,30 +190,130 @@ def main(
                 metrics[k] /= len(train_data)
 
         # Early stopping
-        if is_early_stopping:
-            if metrics[early_stopping_key] - best_valid_score > early_stopping_config["min_delta"]:
-                no_improvement = 0
-            else:
-                no_improvement += 1
+        if metrics[early_stopping_key] - best_valid_score > min_delta:
+            no_improvement = 0
+        else:
+            no_improvement += 1
 
         # Save best model based on validation loss
         if metrics[early_stopping_key] > best_valid_score:
             best_valid_score = metrics[early_stopping_key]
             torch.save(model.state_dict(), model_tmp_file.name)
 
-        # Log metrics
+        # Log metrics and update pbar with them
         for k, v in metrics.items():
             ex.log_scalar(k, v)
 
         if is_pbar:
-            pbar.set_description(", ".join([f"{k}: {v:.4f}" for k, v in metrics.items()]))
+            pbar.set_description(f"{name} -- " + ", ".join([f"{k}: {v:.4f}" for k, v in metrics.items()]))
 
-    # Save best model as an artifact, load model, and delete temporary file
-    ex.add_artifact(model_tmp_file.name, "model.pth")
-    model.load_state_dict(torch.load(model_tmp_file.name))
-    model_tmp_file.close()
+    ex.add_artifact(model_tmp_file.name, f"model_{name}.pt")
+
+
+@ex.automain
+def main(
+    seed: int,
+    final_data_dir: str,
+    pretrain_data_dir: str | None,
+    model_name: str,
+    model_config: dict,
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    is_pbar: bool,
+    is_early_stopping: bool,
+    early_stopping_config: dict,
+    output_images_every: int,
+    val_size: int,
+    transforms: str,
+    early_stopping_key: str,
+    predict_patches: bool,
+):
+    # Config parsing
+    if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
+        raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
+
+    print(f"Device: {DEVICE}")
+
+    model = create_model(
+        model_name,
+        { **model_config, "predict_patches": predict_patches }
+    )
+    model.to(DEVICE)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
+
+    # Split final data now, such that we can use the same validation set for both pretraining and
+    # finetuning
+    stats = torch.load(os.path.join(final_data_dir, "stats.pt"))
+    final_data = ImageSegmentationDataset(
+        os.path.join(final_data_dir, "training", "images"),
+        os.path.join(final_data_dir, "training", "groundtruth"),
+        normalize=(stats["channel_means"], stats["channel_stds"]),
+        target_is_patches=predict_patches,
+        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+    )
+    final_train_data, valid_data = random_split(final_data, [len(final_data) - val_size, val_size])
+
+    # Pretraining
+    if pretrain_data_dir is not None:
+        pretrain_stats = torch.load(os.path.join(pretrain_data_dir, "stats.pt"))
+        pretrain_data = ImageSegmentationDataset(
+            os.path.join(pretrain_data_dir, "images"),
+            os.path.join(pretrain_data_dir, "groundtruth"),
+            normalize=(pretrain_stats["channel_means"], pretrain_stats["channel_stds"]),
+            target_is_patches=predict_patches,
+            size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+        )
+        train(
+            model,
+            "pretraining",
+            pretrain_data,
+            valid_data,
+            batch_size,
+            optimizer,
+            transforms,
+            seed,
+            denormalize=pretrain_data.denormalize,
+            output_val_images_every=output_images_every,
+            epochs=epochs,
+            patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
+            min_delta=early_stopping_config["min_delta"],
+            early_stopping_key=early_stopping_key,
+            predict_patches=predict_patches,
+            is_pbar=is_pbar,
+        )
+
+    # Finetuning
+    train(
+        model,
+        "finetuning",
+        final_train_data,
+        valid_data,
+        batch_size,
+        optimizer,
+        transforms,
+        seed,
+        denormalize=final_data.denormalize,
+        output_val_images_every=output_images_every,
+        epochs=epochs,
+        patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
+        min_delta=early_stopping_config["min_delta"],
+        early_stopping_key=early_stopping_key,
+        predict_patches=predict_patches,
+        is_pbar=is_pbar,
+    )
+
+    # Load best model
+    model.load_state_dict(torch.load(os.path.join(observer.dir, "model_finetuning.pt")))
 
     # Test and output submission file
     model.eval()
     with torch.no_grad():
+        test_data = ImageSegmentationDataset(
+            os.path.join(final_data_dir, "test", "images"),
+            normalize=(stats["channel_means"], stats["channel_stds"]),
+            size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+        )
+        test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
         output_submission_file(ex, observer.dir, model, test_loader, predict_patches)
