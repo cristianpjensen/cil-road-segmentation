@@ -59,7 +59,7 @@ def config():
     }
     epochs = 1000
     batch_size = 4
-    lr = 1e-3
+    lr = 0.1 * (batch_size / 256)
     is_pbar = True
     is_early_stopping = True
     early_stopping_config = {
@@ -92,7 +92,9 @@ def train(
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     transforms: list[str],
+    denormalize_val_data: callable,
     seed: int,
+    valid_data: torch.utils.data.Dataset | None=None,
     output_val_images_every: int=10,
     epochs: int=1000,
     patience: int=50,
@@ -109,9 +111,14 @@ def train(
     model_tmp_file = tempfile.NamedTemporaryFile()
 
     # Data loaders
-    train_data, valid_data = random_split(data, [len(data) - valid_size, valid_size])
-    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
+    if valid_data is None:
+        train_data, valid_data = random_split(data, [len(data) - valid_size, valid_size])
+        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+        valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
+    else:
+        train_data = data
+        train_loader = DataLoader(data, batch_size=batch_size, shuffle=True)
+        valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     
     # Data augmentation
     transformations = compose_transforms(transforms)
@@ -140,7 +147,7 @@ def train(
 
         # Training
         model.train()
-        for (input_BCHW, input_files, target_B1HW, _) in get_iterator(train_loader, leave=False):
+        for i, (input_BCHW, input_files, target_B1HW, _) in enumerate(get_iterator(train_loader, leave=False)):
             model.zero_grad()
 
             # `altflip` generalized to vertical and horizontal flips, and rotations
@@ -159,8 +166,6 @@ def train(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
 
             metrics["train_loss"] += loss.item() * input_BCHW.shape[0]
 
@@ -187,7 +192,7 @@ def train(
                 if epoch % output_val_images_every == 0:
                     input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
                     output_pixel_pred(ex, observer.dir, name, epoch, input_files, pred_BHW, is_patches=predict_patches)
-                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, data.denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
+                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, denormalize_val_data(input_BCHW), pred_BHW, is_patches=predict_patches)
                     image_count += input_BCHW.shape[0]
 
         # Normalize metrics
@@ -196,6 +201,13 @@ def train(
                 metrics[k] /= len(valid_data)
             if "train" in k:
                 metrics[k] /= len(train_data)
+
+        # Update LR scheduler
+        if scheduler is not None:
+            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                scheduler.step(metrics[early_stopping_key])
+            else:
+                scheduler.step()
 
         # Early stopping
         if metrics[early_stopping_key] - best_valid_score > min_delta:
@@ -251,6 +263,19 @@ def main(
     model.to(DEVICE)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
 
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer)
+
+    # Load final data now, so we can use the validation data during pretraining
+    final_data = ImageSegmentationDataset(
+        os.path.join(final_data_dir, "training", "images"),
+        os.path.join(final_data_dir, "training", "groundtruth"),
+        normalize=True,
+        target_is_patches=predict_patches,
+        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+    )
+    train_data, valid_data = random_split(final_data, [len(final_data) - val_size, val_size])
+
     # Pretraining
     if pretrain_data_dir is not None:
         pretrain_data = ImageSegmentationDataset(
@@ -260,7 +285,6 @@ def main(
             target_is_patches=predict_patches,
             size=(IMAGE_HEIGHT, IMAGE_WIDTH),
         )
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
         train(
             model,
             "pretraining",
@@ -268,9 +292,11 @@ def main(
             val_size,
             batch_size,
             optimizer,
-            None,
+            scheduler,
             transforms,
+            final_data.denormalize,
             seed,
+            valid_data=valid_data,
             output_val_images_every=output_images_every,
             epochs=epochs,
             patience=pretraining_early_stopping_config["patience"] if is_early_stopping else epochs + 1,
@@ -284,25 +310,19 @@ def main(
         model.load_state_dict(torch.load(os.path.join(observer.dir, "model_pretraining.pt")))
 
     # Finetuning
-    final_data = ImageSegmentationDataset(
-        os.path.join(final_data_dir, "training", "images"),
-        os.path.join(final_data_dir, "training", "groundtruth"),
-        normalize=True,
-        target_is_patches=predict_patches,
-        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
-    )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 0.1, total_iters=epochs)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max")
     train(
         model,
         "finetuning",
-        final_data,
+        train_data,
         val_size,
         batch_size,
         optimizer,
         scheduler,
         transforms,
+        final_data.denormalize,
         seed,
+        valid_data=valid_data,
         output_val_images_every=output_images_every,
         epochs=epochs,
         patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
