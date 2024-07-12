@@ -22,10 +22,6 @@ class UnetModel(BaseModel):
             patch_size=PATCH_SIZE if self.config["predict_patches"] else 1,
         )
 
-        # Residual layers should not be initialized with Kaiming normal
-        if self.config["block"] == "conv":
-            self.model.apply(init_weights)
-
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(1)
 
@@ -122,9 +118,3 @@ class PosEnc(nn.Module):
 
     def forward(self, x: torch.Tensor):
         return x + self.pos_enc[:, :x.shape[1]]
-
-
-def init_weights(m):
-    if isinstance(m, nn.Conv2d):
-        nn.init.kaiming_normal_(m.weight)
-        m.bias.data.fill_(0.01)

@@ -21,10 +21,6 @@ class UnetPlusPlusModel(BaseModel):
             deep_supervision=self.config["unetplusplus"]["deep_supervision"],
         )
 
-        # Residual layers should not be initialized with Kaiming normal
-        if self.config["block"] == "conv":
-            self.model.apply(init_weights)
-
     def step(self, input_BCHW):
         return self.model(input_BCHW).squeeze(2).mean(1)
 
@@ -101,9 +97,3 @@ class UnetPlusPlus(nn.Module):
 
         # Finally the dense layer that make the prediction per pixel/patch
         return torch.stack([final_conv(xs[0][self.N - 1 - i]) for i, final_conv in enumerate(self.final_convs)], dim=1)
-
-
-def init_weights(m):
-    if isinstance(m, nn.Conv2d):
-        nn.init.kaiming_normal_(m.weight)
-        m.bias.data.fill_(0.01)
