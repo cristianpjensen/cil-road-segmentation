@@ -59,7 +59,7 @@ def config():
     }
     epochs = 1000
     batch_size = 4
-    lr = 0.1 * (batch_size / 256)
+    lr = 1e-3
     is_pbar = True
     is_early_stopping = True
     early_stopping_config = {
@@ -264,7 +264,6 @@ def main(
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer)
 
     # Load final data now, so we can use the validation data during pretraining
     final_data = ImageSegmentationDataset(
@@ -278,6 +277,7 @@ def main(
 
     # Pretraining
     if pretrain_data_dir is not None:
+        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer)
         pretrain_data = ImageSegmentationDataset(
             os.path.join(pretrain_data_dir, "images"),
             os.path.join(pretrain_data_dir, "groundtruth"),
@@ -310,7 +310,7 @@ def main(
         model.load_state_dict(torch.load(os.path.join(observer.dir, "model_pretraining.pt")))
 
     # Finetuning
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max")
+    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer)
     train(
         model,
         "finetuning",

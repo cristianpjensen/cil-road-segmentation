@@ -5,11 +5,11 @@ class ConvBlock(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, act_fn: nn.Module=nn.ReLU):
         super().__init__()
         self.block = nn.Sequential(
-            act_fn(),
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
             act_fn(),
+            nn.BatchNorm2d(out_channels),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            act_fn(),
         )
         self.init_weights()
 
@@ -45,7 +45,7 @@ class Res18Block(nn.Module):
         self.init_weights()
 
     def forward(self, x):
-        return self.block(x) + self.conv_skip(x)
+        return self.act(self.block(x) + self.conv_skip(x))
 
     def init_weights(self):
         for m in self.modules():
@@ -84,7 +84,7 @@ class Res50Block(nn.Module):
         self.init_weights()
 
     def forward(self, x):
-        return self.block(x) + self.conv_skip(x)
+        return self.act(self.block(x) + self.conv_skip(x))
 
     def init_weights(self):
         for m in self.modules():
