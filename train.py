@@ -247,11 +247,10 @@ def main(
 
     # Pretraining
     if pretrain_data_dir is not None:
-        pretrain_stats = torch.load(os.path.join(pretrain_data_dir, "stats.pt"))
         pretrain_data = ImageSegmentationDataset(
             os.path.join(pretrain_data_dir, "images"),
             os.path.join(pretrain_data_dir, "groundtruth"),
-            normalize=(pretrain_stats["channel_means"], pretrain_stats["channel_stds"]),
+            normalize=True,
             target_is_patches=predict_patches,
             size=(IMAGE_HEIGHT, IMAGE_WIDTH),
         )
@@ -279,11 +278,10 @@ def main(
         model.load_state_dict(torch.load(os.path.join(observer.dir, "model_pretraining.pt")))
 
     # Finetuning
-    stats = torch.load(os.path.join(final_data_dir, "stats.pt"))
     final_data = ImageSegmentationDataset(
         os.path.join(final_data_dir, "training", "images"),
         os.path.join(final_data_dir, "training", "groundtruth"),
-        normalize=(stats["channel_means"], stats["channel_stds"]),
+        normalize=True,
         target_is_patches=predict_patches,
         size=(IMAGE_HEIGHT, IMAGE_WIDTH),
     )
@@ -316,7 +314,7 @@ def main(
     with torch.no_grad():
         test_data = ImageSegmentationDataset(
             os.path.join(final_data_dir, "test", "images"),
-            normalize=(stats["channel_means"], stats["channel_stds"]),
+            normalize=True,
             size=(IMAGE_HEIGHT, IMAGE_WIDTH),
         )
         test_loader = DataLoader(test_data, batch_size=1, shuffle=False)
