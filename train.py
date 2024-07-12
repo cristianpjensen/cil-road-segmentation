@@ -104,7 +104,7 @@ def train(
     model_tmp_file = tempfile.NamedTemporaryFile()
 
     # Data loaders
-    train_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     
     # Data augmentation
