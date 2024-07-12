@@ -85,6 +85,7 @@ def train(
     valid_size: int,
     batch_size: int,
     optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     transforms: list[str],
     seed: int,
     output_val_images_every: int=10,
@@ -153,6 +154,8 @@ def train(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+            if scheduler is not None:
+                scheduler.step()
 
             metrics["train_loss"] += loss.item() * input_BCHW.shape[0]
 
@@ -260,6 +263,7 @@ def main(
             val_size,
             batch_size,
             optimizer,
+            None,
             transforms,
             seed,
             output_val_images_every=output_images_every,
@@ -291,6 +295,7 @@ def main(
         final_data,
         val_size,
         batch_size,
+        optimizer,
         scheduler,
         transforms,
         seed,
