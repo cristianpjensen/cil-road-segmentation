@@ -42,6 +42,7 @@ def config():
         # Configuration specific to U-nets
         "activation": "relu", # "relu", "gelu", "silu"
         "block": "conv", # "conv", "res18", "res50", "resv2"
+        "blocks_per_layer": 1,
         "channels": [64, 128, 256, 512, 1024],
         "bottleneck_mhsa_layers": 0,
         "num_heads": 8,

@@ -19,6 +19,7 @@ class UnetModel(BaseModel):
             num_heads=self.config["num_heads"],
             act_fn=act_fn,
             block=block,
+            blocks_per_layer=self.config["blocks_per_layer"],
             patch_size=PATCH_SIZE if self.config["predict_patches"] else 1,
         )
 
@@ -44,6 +45,7 @@ class Unet(nn.Module):
         num_heads: int=1,
         act_fn: nn.Module=nn.ReLU,
         block: nn.Module=ConvBlock,
+        blocks_per_layer: int=1,
         patch_size: int=1,
     ):
         super().__init__()
@@ -52,9 +54,12 @@ class Unet(nn.Module):
 
         # Use a normal convolution for the first layer, because we want to keep the number of channels
         # a power of 2
-        self.initial_conv = ConvBlock(in_channels, channels[0], act_fn)
+        self.initial_conv = nn.Sequential(
+            ConvBlock(in_channels, channels[0], act_fn),
+            *[block(channels[0], channels[0], act_fn) for _ in range(blocks_per_layer - 1)],
+        )
         self.enc_blocks = nn.ModuleList([
-            block(in_c, out_c, act_fn)
+            nn.Sequential(block(in_c, out_c, act_fn), *[block(out_c, out_c, act_fn) for _ in range(blocks_per_layer - 1)])
             for in_c, out_c in zip(enc_channels[:-1], enc_channels[1:])
         ])
         self.up_convs = nn.ModuleList([
@@ -62,7 +67,7 @@ class Unet(nn.Module):
             for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])
         ])
         self.dec_blocks = nn.ModuleList([
-            block(in_c, out_c, act_fn)
+            nn.Sequential(block(in_c, out_c, act_fn), *[block(out_c, out_c, act_fn) for _ in range(blocks_per_layer - 1)])
             for in_c, out_c in zip(dec_channels[:-1], dec_channels[1:])
         ])
 

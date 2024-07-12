@@ -17,6 +17,7 @@ class UnetPlusPlusModel(BaseModel):
             channels=self.config["channels"],
             act_fn=act_fn,
             block=block,
+            blocks_per_layer=self.config["blocks_per_layer"],
             patch_size=PATCH_SIZE if self.config["predict_patches"] else 1,
             deep_supervision=self.config["unetplusplus"]["deep_supervision"],
         )
@@ -39,6 +40,7 @@ class UnetPlusPlus(nn.Module):
         channels: list[int]=[64, 128, 256, 512, 1024],
         act_fn: nn.Module=nn.ReLU,
         block: nn.Module=ConvBlock,
+        blocks_per_layer: int=1,
         patch_size: int=1,
         deep_supervision: bool=False,
     ):
@@ -64,7 +66,10 @@ class UnetPlusPlus(nn.Module):
                 else:
                     c_in = j * channels[i] + channels[i+1]
 
-                convs_i.append(block(c_in, channels[i], act_fn))
+                if i == 0 and j == 0:
+                    convs_i.append(nn.Sequential(ConvBlock(c_in, channels[i], act_fn), *[block(channels[i], channels[i], act_fn) for _ in range(blocks_per_layer-1)]))
+                else:
+                    convs_i.append(nn.Sequential(block(c_in, channels[i], act_fn), *[block(channels[i], channels[i], act_fn) for _ in range(blocks_per_layer-1)]))
 
             self.convs.append(nn.ModuleList(convs_i))
 
