@@ -81,13 +81,12 @@ def get_iterator(iterator, is_pbar, **kwargs):
 def train(
     model: nn.Module,
     name: str,
-    train_data: torch.utils.data.Dataset,
-    valid_data: torch.utils.data.Dataset,
+    data: torch.utils.data.Dataset,
+    valid_size: int,
     batch_size: int,
     optimizer: torch.optim.Optimizer,
     transforms: list[str],
     seed: int,
-    denormalize: callable,
     output_val_images_every: int=10,
     epochs: int=1000,
     patience: int=50,
@@ -104,6 +103,7 @@ def train(
     model_tmp_file = tempfile.NamedTemporaryFile()
 
     # Data loaders
+    train_data, valid_data = random_split(data, [len(data) - valid_size, valid_size])
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     
@@ -179,7 +179,7 @@ def train(
                 if epoch % output_val_images_every == 0:
                     input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
                     output_pixel_pred(ex, observer.dir, name, epoch, input_files, pred_BHW, is_patches=predict_patches)
-                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
+                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, data.denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
                     image_count += input_BCHW.shape[0]
 
         # Normalize metrics
@@ -240,20 +240,7 @@ def main(
         { **model_config, "predict_patches": predict_patches }
     )
     model.to(DEVICE)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
-
-    # Split final data now, such that we can use the same validation set for both pretraining and
-    # finetuning
-    stats = torch.load(os.path.join(final_data_dir, "stats.pt"))
-    final_data = ImageSegmentationDataset(
-        os.path.join(final_data_dir, "training", "images"),
-        os.path.join(final_data_dir, "training", "groundtruth"),
-        normalize=(stats["channel_means"], stats["channel_stds"]),
-        target_is_patches=predict_patches,
-        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
-    )
-    final_train_data, valid_data = random_split(final_data, [len(final_data) - val_size, val_size])
 
     # Pretraining
     if pretrain_data_dir is not None:
@@ -265,16 +252,16 @@ def main(
             target_is_patches=predict_patches,
             size=(IMAGE_HEIGHT, IMAGE_WIDTH),
         )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
         train(
             model,
             "pretraining",
             pretrain_data,
-            valid_data,
+            val_size,
             batch_size,
             optimizer,
             transforms,
             seed,
-            denormalize=pretrain_data.denormalize,
             output_val_images_every=output_images_every,
             epochs=epochs,
             patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
@@ -284,17 +271,29 @@ def main(
             is_pbar=is_pbar,
         )
 
+        # Load best model from pretraining
+        model.load_state_dict(torch.load(os.path.join(observer.dir, "model_pretraining.pt")))
+
     # Finetuning
+    stats = torch.load(os.path.join(final_data_dir, "stats.pt"))
+    final_data = ImageSegmentationDataset(
+        os.path.join(final_data_dir, "training", "images"),
+        os.path.join(final_data_dir, "training", "groundtruth"),
+        normalize=(stats["channel_means"], stats["channel_stds"]),
+        target_is_patches=predict_patches,
+        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, 1.0, 0.1, total_iters=epochs)
     train(
         model,
         "finetuning",
-        final_train_data,
-        valid_data,
+        final_data,
+        val_size,
         batch_size,
-        optimizer,
+        scheduler,
         transforms,
         seed,
-        denormalize=final_data.denormalize,
         output_val_images_every=output_images_every,
         epochs=epochs,
         patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
