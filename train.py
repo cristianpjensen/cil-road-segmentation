@@ -66,6 +66,11 @@ def config():
         "patience": 50,
         "min_delta": 1e-4,
     }
+    pretraining_early_stopping_config = {
+        # We have significantly more data for pretraining
+        "patience": 10,
+        "min_delta": 1e-4
+    }
     output_images_every = 10
     val_size = 10
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
@@ -226,6 +231,7 @@ def main(
     is_pbar: bool,
     is_early_stopping: bool,
     early_stopping_config: dict,
+    pretraining_early_stopping_config: dict,
     output_images_every: int,
     val_size: int,
     transforms: str,
@@ -267,8 +273,8 @@ def main(
             seed,
             output_val_images_every=output_images_every,
             epochs=epochs,
-            patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
-            min_delta=early_stopping_config["min_delta"],
+            patience=pretraining_early_stopping_config["patience"] if is_early_stopping else epochs + 1,
+            min_delta=pretraining_early_stopping_config["min_delta"],
             early_stopping_key=early_stopping_key,
             predict_patches=predict_patches,
             is_pbar=is_pbar,
