@@ -90,7 +90,7 @@ class ImageSegmentationDataset(Dataset):
 
 
 def normalize(x: torch.Tensor) -> torch.Tensor:
-    return x - CHANNEL_MEANS.to(x.device) / CHANNEL_STDS.to(x.device)
+    return (x - CHANNEL_MEANS.to(x.device)) / CHANNEL_STDS.to(x.device)
 
 
 def denormalize(x: torch.Tensor) -> torch.Tensor:
