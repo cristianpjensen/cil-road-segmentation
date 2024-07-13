@@ -66,16 +66,17 @@ def config():
     early_stopping_config = {
         "patience": 50,
         "min_delta": 1e-4,
+        "key": "valid_patch_acc",
     }
     pretraining_early_stopping_config = {
         # We have significantly more data for pretraining
         "patience": 10,
-        "min_delta": 1e-4
+        "min_delta": 1e-4,
+        "key": "train_loss",
     }
     output_images_every = 10
     val_size = 10
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
-    early_stopping_key = "valid_patch_acc"
     predict_patches = False
 
 
@@ -247,7 +248,6 @@ def main(
     output_images_every: int,
     val_size: int,
     transforms: str,
-    early_stopping_key: str,
     predict_patches: bool,
 ):
     # Config parsing
@@ -298,7 +298,7 @@ def main(
             epochs=epochs,
             patience=pretraining_early_stopping_config["patience"] if is_early_stopping else epochs + 1,
             min_delta=pretraining_early_stopping_config["min_delta"],
-            early_stopping_key=early_stopping_key,
+            early_stopping_key=pretraining_early_stopping_config["key"],
             predict_patches=predict_patches,
             is_pbar=is_pbar,
         )
@@ -323,7 +323,7 @@ def main(
         epochs=epochs,
         patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
         min_delta=early_stopping_config["min_delta"],
-        early_stopping_key=early_stopping_key,
+        early_stopping_key=early_stopping_config["key"],
         predict_patches=predict_patches,
         is_pbar=is_pbar,
     )
