@@ -7,6 +7,7 @@ from torchvision.io import ImageReadMode
 import torchvision.transforms.functional as TF
 
 from .evaluation import patchify
+from .constants import CHANNEL_MEANS, CHANNEL_STDS
 
 
 class ImageSegmentationDataset(Dataset):
@@ -89,8 +90,8 @@ class ImageSegmentationDataset(Dataset):
 
 
 def normalize(x: torch.Tensor) -> torch.Tensor:
-    return x * 2 - 1
+    return x - CHANNEL_MEANS.to(x.device) / CHANNEL_STDS.to(x.device)
 
 
 def denormalize(x: torch.Tensor) -> torch.Tensor:
-    return (x + 1) / 2
+    return x * CHANNEL_STDS.to(x.device) + CHANNEL_MEANS.to(x.device)

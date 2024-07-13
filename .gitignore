@@ -166,4 +166,5 @@ temp/
 *.csv
 .DS_Store
 slurm*
-scraped_data/
+*data*
+*.zip

@@ -55,7 +55,7 @@ def config():
 
         # Configuration specific to model_name="unet++"
         "unetplusplus": {
-            "deep_supervision": False,
+            "deep_supervision": True,
         }
     }
     epochs = 1000
