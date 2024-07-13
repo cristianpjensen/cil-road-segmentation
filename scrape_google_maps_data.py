@@ -62,7 +62,11 @@ def fetch_image(url: str) -> list[torch.Tensor] | None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("coords_file", help=".txt file containing coordinates in <lat>, <lon> format.", type=str)
+    parser.add_argument(
+        "coords_file",
+        help=".txt file containing coordinates in <lat>, <lon> format.",
+        type=str,
+    )
     parser.add_argument(
         "--output_dir",
         type=str,

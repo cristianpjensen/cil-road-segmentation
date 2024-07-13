@@ -8,10 +8,10 @@ from sacred.utils import apply_backspaces_and_linefeeds
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
 from tqdm import tqdm
-from src.augmentation import alternating_transforms, compose_transforms
 
+from src.augmentation import alternating_transforms, compose_transforms
 from src.models.create_model import create_model
-from src.dataset import ImageSegmentationDataset
+from src.dataset import ImageSegmentationDataset, denormalize
 from src.constants import DEVICE, IMAGE_HEIGHT, IMAGE_WIDTH
 from src.evaluation import (
     patch_f1_score,
@@ -93,7 +93,6 @@ def train(
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     transforms: list[str],
-    denormalize_val_data: callable,
     seed: int,
     valid_data: torch.utils.data.Dataset | None=None,
     output_val_images_every: int=10,
@@ -193,7 +192,7 @@ def train(
                 if epoch % output_val_images_every == 0:
                     input_BCHW, pred_BHW = input_BCHW.cpu(), pred_BHW.cpu()
                     output_pixel_pred(ex, observer.dir, name, epoch, input_files, pred_BHW, is_patches=predict_patches)
-                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, denormalize_val_data(input_BCHW), pred_BHW, is_patches=predict_patches)
+                    output_mask_overlay(ex, observer.dir, name, epoch, input_files, denormalize(input_BCHW), pred_BHW, is_patches=predict_patches)
                     image_count += input_BCHW.shape[0]
 
         # Normalize metrics
@@ -270,7 +269,6 @@ def main(
     final_data = ImageSegmentationDataset(
         os.path.join(final_data_dir, "training", "images"),
         os.path.join(final_data_dir, "training", "groundtruth"),
-        normalize=True,
         target_is_patches=predict_patches,
         size=(IMAGE_HEIGHT, IMAGE_WIDTH),
     )
@@ -282,7 +280,6 @@ def main(
         pretrain_data = ImageSegmentationDataset(
             os.path.join(pretrain_data_dir, "images"),
             os.path.join(pretrain_data_dir, "groundtruth"),
-            normalize=True,
             target_is_patches=predict_patches,
             size=(IMAGE_HEIGHT, IMAGE_WIDTH),
         )
@@ -295,7 +292,6 @@ def main(
             optimizer,
             scheduler,
             transforms,
-            final_data.denormalize,
             seed,
             valid_data=valid_data,
             output_val_images_every=output_images_every,
@@ -321,7 +317,6 @@ def main(
         optimizer,
         scheduler,
         transforms,
-        final_data.denormalize,
         seed,
         valid_data=valid_data,
         output_val_images_every=output_images_every,
@@ -341,7 +336,6 @@ def main(
     with torch.no_grad():
         test_data = ImageSegmentationDataset(
             os.path.join(final_data_dir, "test", "images"),
-            normalize=True,
             size=(IMAGE_HEIGHT, IMAGE_WIDTH),
         )
         test_loader = DataLoader(test_data, batch_size=1, shuffle=False)

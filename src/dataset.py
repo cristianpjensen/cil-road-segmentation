@@ -15,8 +15,6 @@ class ImageSegmentationDataset(Dataset):
     Args:
         input_dir: Directory containing input images.
         target_dir: Directory containing target images.
-        normalize: Normalize input images. If True, normalize using mean and std of input images.
-            If a tuple, normalize using the provided mean and std.
         transform: Transform to apply to input images.
         target_transform: Transform to apply to target images.
 
@@ -26,7 +24,6 @@ class ImageSegmentationDataset(Dataset):
         self,
         input_dir: str,
         target_dir=None,
-        normalize: bool | tuple[torch.Tensor, torch.Tensor] = False,
         target_is_patches: bool = False,
         size: tuple[int, int]=(400, 400),
         transform=lambda x: x,
@@ -45,18 +42,8 @@ class ImageSegmentationDataset(Dataset):
             self.target_file_names = None
             self.target_NHW = None
 
-        # Set normalization parameters
-        match normalize:
-            case True:
-                self.channel_means = torch.mean(self.input_NCHW, dim=[0, 2, 3], keepdim=True)
-                self.channel_stds = torch.std(self.input_NCHW, dim=[0, 2, 3], keepdim=True)
-            
-            case (channel_means, channel_stds):
-                self.channel_means = channel_means
-                self.channel_stds = channel_stds
-
         # Normalize input images
-        self.input_NCHW = self.normalize(self.input_NCHW)
+        self.input_NCHW = normalize(self.input_NCHW)
 
         # Resize
         self.input_NCHW = TF.resize(self.input_NCHW, size)
@@ -65,12 +52,6 @@ class ImageSegmentationDataset(Dataset):
 
         if target_is_patches and self.target_NHW is not None:
             self.target_NHW = patchify(self.target_NHW).mean(dim=[-2, -1])
-    
-    def normalize(self, x):
-        return (x - self.channel_means) / self.channel_stds
-
-    def denormalize(self, x):
-        return x * self.channel_stds + self.channel_means
 
     def _get_image_files(self, dir: str):
         return sorted([path.split("/")[-1] for path in glob(os.path.join(dir, "*"))])
@@ -105,3 +86,11 @@ class ImageSegmentationDataset(Dataset):
             return (1 - self.target_NHW).sum() / self.target_NHW.sum()
 
         return None
+
+
+def normalize(x: torch.Tensor) -> torch.Tensor:
+    return x * 2 - 1
+
+
+def denormalize(x: torch.Tensor) -> torch.Tensor:
+    return (x + 1) / 2

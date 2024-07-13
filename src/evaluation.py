@@ -147,7 +147,13 @@ def get_pixel_pred_dir(ex_dir: str, dir: str, epoch: int, file_name: str | None 
         return os.path.join(f"{dir}_valid", str(epoch), "pixel_pred", file_name)
 
 
-def output_submission_file(ex: Experiment, dir: str, model: BaseModel, test_loader: DataLoader, predict_patches: bool=False):
+def output_submission_file(
+    ex: Experiment,
+    dir: str,
+    model: BaseModel,
+    test_loader: DataLoader,
+    predict_patches: bool=False,
+):
     """Given a model and data loader, output a submission file for the test set. It assumes that the
     data loader does not contain targets."""
 
