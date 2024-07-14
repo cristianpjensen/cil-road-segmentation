@@ -67,12 +67,14 @@ def config():
         "patience": 50,
         "min_delta": 1e-4,
         "key": "valid_patch_acc",
+        "mode": "max",
     }
     pretraining_early_stopping_config = {
         # We have significantly more data for pretraining
         "patience": 10,
         "min_delta": 1e-4,
         "key": "train_loss",
+        "mode": "min",
     }
     output_images_every = 10
     val_size = 10
@@ -101,6 +103,7 @@ def train(
     patience: int=50,
     min_delta: float=1e-4,
     early_stopping_key: str="valid_patch_acc",
+    early_stopping_mode: str="max",
     predict_patches: bool=False,
     is_pbar: bool=True,
 ):
@@ -210,15 +213,20 @@ def train(
             else:
                 scheduler.step()
 
+        if early_stopping_mode == "min":
+            early_stopping_metric = -metrics[early_stopping_key]
+        else:
+            early_stopping_metric = metrics[early_stopping_key]
+
         # Early stopping
-        if metrics[early_stopping_key] - best_valid_score > min_delta:
+        if early_stopping_metric - best_valid_score > min_delta:
             no_improvement = 0
         else:
             no_improvement += 1
 
         # Save best model based on validation loss
-        if metrics[early_stopping_key] > best_valid_score:
-            best_valid_score = metrics[early_stopping_key]
+        if early_stopping_metric > best_valid_score:
+            best_valid_score = early_stopping_metric
             torch.save(model.state_dict(), model_tmp_file.name)
 
         # Log metrics and update pbar with them
@@ -226,7 +234,7 @@ def train(
             ex.log_scalar(k, v)
 
         if is_pbar:
-            pbar.set_description(f"{name} -- " + ", ".join([f"{k}: {v:.4f}" for k, v in metrics.items()]))
+            pbar.set_description(f"{name} -- no_improvement: {no_improvement}, " + ", ".join([f"{k}: {v:.4f}" for k, v in metrics.items()]))
 
     ex.add_artifact(model_tmp_file.name, f"model_{name}.pt")
 
@@ -299,6 +307,7 @@ def main(
             patience=pretraining_early_stopping_config["patience"] if is_early_stopping else epochs + 1,
             min_delta=pretraining_early_stopping_config["min_delta"],
             early_stopping_key=pretraining_early_stopping_config["key"],
+            early_stopping_mode=pretraining_early_stopping_config["mode"],
             predict_patches=predict_patches,
             is_pbar=is_pbar,
         )
@@ -324,6 +333,7 @@ def main(
         patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,
         min_delta=early_stopping_config["min_delta"],
         early_stopping_key=early_stopping_config["key"],
+        early_stopping_mode=early_stopping_config["mode"],
         predict_patches=predict_patches,
         is_pbar=is_pbar,
     )
