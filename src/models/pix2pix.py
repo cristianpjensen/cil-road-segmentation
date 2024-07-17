@@ -33,11 +33,10 @@ class Pix2PixModel(BaseModel):
         # Train the discriminator
         self.d_optimizer.zero_grad()
 
+        pred_BHW = F.sigmoid(self.generator(input_BCHW).detach().squeeze(1))
         if self.predict_patches:
-            patchwise_pred_BMN = F.sigmoid(self.generator(input_BCHW).detach().squeeze(1))
-            pred_BHW = patchwise_pred_BMN.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
-        else:
-            pred_BHW = F.sigmoid(self.generator(input_BCHW).detach().squeeze(1))
+            pred_BHW = pred_BHW.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
+            target_BHW = target_BHW.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
 
         real_pred = self.discriminator(input_BCHW, target_BHW.unsqueeze(1))
         fake_pred = self.discriminator(input_BCHW, pred_BHW.unsqueeze(1))
@@ -52,6 +51,9 @@ class Pix2PixModel(BaseModel):
         self.g_optimizer.zero_grad()
 
         pred_BHW = F.sigmoid(self.generator(input_BCHW).squeeze(1))
+        if self.predict_patches:
+            pred_BHW = pred_BHW.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
+
         g_loss = self._generator_loss(input_BCHW, pred_BHW, target_BHW)
 
         g_loss.backward()
