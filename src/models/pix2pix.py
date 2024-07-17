@@ -35,7 +35,8 @@ class Pix2PixModel(BaseModel):
         pred_BHW = F.sigmoid(self.generator(input_BCHW).squeeze(1)).detach()
         real_pred = self.discriminator(input_BCHW, target_BHW.unsqueeze(1))
         fake_pred = self.discriminator(input_BCHW, pred_BHW.unsqueeze(1))
-        d_loss = self._discriminator_loss(real_pred, fake_pred)
+        d_real_loss, d_fake_loss = self._discriminator_loss(real_pred, fake_pred)
+        d_loss = d_real_loss + d_fake_loss
 
         d_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.discriminator.parameters(), 1.0)
@@ -51,7 +52,7 @@ class Pix2PixModel(BaseModel):
         torch.nn.utils.clip_grad_norm_(self.generator.parameters(), 1.0)
         self.g_optimizer.step()
 
-        return { "g_loss": g_loss.item(), "d_loss": d_loss.item() }
+        return { "g_loss": g_loss.item(), "d_real_loss": d_real_loss.item(), "d_fake_loss": d_fake_loss.item() }
 
     def _generator_loss(self, input_BCHW: torch.Tensor, pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
         disc_pred = self.discriminator(input_BCHW, pred_BHW.unsqueeze(1))
@@ -64,7 +65,7 @@ class Pix2PixModel(BaseModel):
         # fake, 0.
         real_loss = F.binary_cross_entropy_with_logits(real, torch.ones_like(real))
         fake_loss = F.binary_cross_entropy_with_logits(fake, torch.zeros_like(fake))
-        return real_loss + fake_loss
+        return real_loss, fake_loss
 
     def predict(self, input_BCHW):
         return F.sigmoid(self.generator(input_BCHW).squeeze(1))
