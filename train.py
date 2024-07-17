@@ -63,6 +63,7 @@ def config():
         # Configuration specific to model_name="pix2pix"
         "pix2pix": {
             "l1_weight": 100,
+            "patch_discriminator": False,
         },
     }
     epochs = 1000

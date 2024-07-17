@@ -21,20 +21,23 @@ class Pix2PixModel(BaseModel):
             blocks_per_layer=self.config["blocks_per_layer"],
             patch_size=PATCH_SIZE if self.config["predict_patches"] else 1,
         )
-        self.discriminator = Discriminator(in_channels=4)
+        if self.config["predict_patches"] and self.config["pix2pix"]["patch_discriminator"]:
+            self.discriminator = PatchDiscriminator(input_channels=3, target_channels=1)
+        else:
+            self.discriminator = Discriminator(in_channels=4)
 
         self.g_optimizer = torch.optim.AdamW(self.generator.parameters(), lr=self.config["lr"])
         self.d_optimizer = torch.optim.AdamW(self.discriminator.parameters(), lr=self.config["lr"])
 
         self.l1_weight = self.config["pix2pix"]["l1_weight"]
-        self.predict_patches = self.config["predict_patches"]
+        self.interleave_patches = self.config["predict_patches"] and not self.config["pix2pix"]["patch_discriminator"]
 
     def training_step(self, input_BCHW, target_BHW):
         # Train the discriminator
         self.d_optimizer.zero_grad()
 
         pred_BHW = F.sigmoid(self.generator(input_BCHW).detach().squeeze(1))
-        if self.predict_patches:
+        if self.interleave_patches:
             pred_BHW = pred_BHW.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
             target_BHW = target_BHW.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
 
@@ -51,7 +54,7 @@ class Pix2PixModel(BaseModel):
         self.g_optimizer.zero_grad()
 
         pred_BHW = F.sigmoid(self.generator(input_BCHW).squeeze(1))
-        if self.predict_patches:
+        if self.interleave_patches:
             pred_BHW = pred_BHW.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
 
         g_loss = self._generator_loss(input_BCHW, pred_BHW, target_BHW)
@@ -96,7 +99,7 @@ class DiscriminatorDownsample(nn.Module):
                 out_channels,
                 kernel_size=4,
                 stride=2,
-                padding=1
+                padding=1,
             ),
             nn.BatchNorm2d(out_channels) if norm else nn.Identity(),
             nn.LeakyReLU(0.2, inplace=True),
@@ -118,23 +121,81 @@ class Discriminator(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            DiscriminatorDownsample(in_channels, 64, norm=False),
-            DiscriminatorDownsample(64, 128),
-            DiscriminatorDownsample(128, 256),
-            DiscriminatorDownsample(256, 512),
-            nn.Conv2d(512, 1, kernel_size=4, padding=1, bias=False),
+            DiscriminatorDownsample(in_channels, 64, norm=False), # [64, 200, 200]
+            DiscriminatorDownsample(64, 128), # [128, 100, 100]
+            DiscriminatorDownsample(128, 256), # [256, 50, 50]
+            DiscriminatorDownsample(256, 512), # [512, 25, 25]
+            nn.Conv2d(512, 1, kernel_size=4, padding=2, bias=False), # [1, 25, 25]
         )
-        self.apply(self.init_weights)
+        self.apply(init_weights)
 
     def forward(self, x, y):
         return self.net(torch.cat([x, y], dim=1))
 
-    def init_weights(self, m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight, a=0.2, nonlinearity="leaky_relu")
-            if m.bias is not None:
-                nn.init.normal_(m.bias, 0.0, 0.02)
 
-        if isinstance(m, nn.BatchNorm2d):
-            nn.init.constant_(m.weight, 1)
-            nn.init.constant_(m.bias, 0)
+class PatchDiscriminatorTargetBlock(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        norm: bool = False,
+    ):
+        super().__init__()
+
+        self.block = nn.Sequential(
+            nn.Conv2d(
+                in_channels,
+                out_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            ),
+            nn.BatchNorm2d(out_channels) if norm else nn.Identity(),
+            nn.LeakyReLU(0.2, inplace=True),
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+class PatchDiscriminator(nn.Module):
+    def __init__(self, input_channels: int=3, target_channels: int=1):
+        super().__init__()
+
+        # The image is 400x400, while the target is 25x25, because it contains 16x16 patchwise predictions
+        self.input_net = nn.Sequential(
+            DiscriminatorDownsample(input_channels, 64, norm=False), # [64, 200, 200]
+            DiscriminatorDownsample(64, 128), # [128, 100, 100]
+            DiscriminatorDownsample(128, 256), # [256, 50, 50]
+            DiscriminatorDownsample(256, 512), # [512, 25, 25]
+        )
+        self.target_net = nn.Sequential(
+            PatchDiscriminatorTargetBlock(target_channels, 64, norm=False), # [64, 25, 25]
+            PatchDiscriminatorTargetBlock(64, 128), # [128, 25, 25]
+            PatchDiscriminatorTargetBlock(128, 256), # [256, 25, 25]
+            PatchDiscriminatorTargetBlock(256, 512), # [512, 25, 25]
+        )
+        self.combo_net = nn.Sequential(
+            PatchDiscriminatorTargetBlock(1024, 512), # [512, 25, 25]
+            PatchDiscriminatorTargetBlock(512, 512), # [512, 25, 25]
+            nn.Conv2d(512, 1, kernel_size=4, padding=2, bias=False), # [1, 25, 25]
+        )
+
+        self.apply(init_weights)
+
+    def forward(self, x, y):
+        input_features = self.input_net(x)
+        target_features = self.target_net(y)
+        features = torch.cat([input_features, target_features], dim=1)
+        return self.combo_net(features)
+
+
+def init_weights(m):
+    if isinstance(m, nn.Conv2d):
+        nn.init.kaiming_normal_(m.weight, a=0.2, nonlinearity="leaky_relu")
+        if m.bias is not None:
+            nn.init.normal_(m.bias, 0.0, 0.02)
+
+    if isinstance(m, nn.BatchNorm2d):
+        nn.init.constant_(m.weight, 1)
+        nn.init.constant_(m.bias, 0)
