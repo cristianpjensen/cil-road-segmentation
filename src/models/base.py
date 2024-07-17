@@ -3,11 +3,60 @@ import torch
 import torch.nn as nn
 
 
-class BaseModel(nn.Module):
+class BaseModel():
     def __init__(self, config):
         super().__init__()
         self.config = config
         self.create_model()
+
+    def to_device(self, device: torch.device):
+        """Iterate over attributes and add nn.Modules to device."""
+
+        for attr in self.__dict__.values():
+            if isinstance(attr, nn.Module):
+                attr.to(device)
+
+    def num_params(self) -> int:
+        """Iterate over attributes and add up the number of parameters of all nn.Modules."""
+
+        total_params = 0
+        for attr in self.__dict__.values():
+            if isinstance(attr, nn.Module):
+                total_params += sum(p.numel() for p in attr.parameters())
+
+        return total_params
+
+    def train(self):
+        """Iterate over attributes and set the model to train mode."""
+
+        for attr in self.__dict__.values():
+            if isinstance(attr, nn.Module):
+                attr.train()
+
+    def eval(self):
+        """Iterate over attributes and set the model to eval mode."""
+
+        for attr in self.__dict__.values():
+            if isinstance(attr, nn.Module):
+                attr.eval()
+
+    def save(self, path: str):
+        """Iterate over attributes and save the model to the given path."""
+
+        state_dicts = {}
+        for name, attr in self.__dict__.items():
+            if isinstance(attr, nn.Module):
+                state_dicts[name] = attr.state_dict()
+
+        torch.save(state_dicts, path)
+
+    def load(self, path: str):
+        """Iterate over attributes and load the model from the given path."""
+
+        state_dicts = torch.load(path)
+        for name, attr in self.__dict__.items():
+            if name in state_dicts:
+                attr.load_state_dict(state_dicts[name])
 
     @abstractmethod
     def create_model(self):
@@ -18,23 +67,12 @@ class BaseModel(nn.Module):
         raise NotImplementedError
 
     @abstractmethod
-    def step(self, input_BCHW: torch.Tensor) -> torch.Tensor:
+    def training_step(self, input_BCHW: torch.Tensor, target_BHW: torch.Tensor) -> dict:
         """
-        The output of this method will be passed to the loss method. The reason for two separate
-        methods (`step` and `predict`) is that the outputs may be different. E.g., in the case of a
-        BCE loss, `step` should return the logits, while `predict` should return the probabilities,
-        because logits are more numerically stable.
+        Perform a full training step, including the forward and backward pass. Return a dictionary
+        with the loss values. These will be logged.
 
-        NOTE: Make sure to put the model in train mode (call `model.train()`) before calling this
-        method.
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    def loss(self, pred_BHW: torch.Tensor, target_BHW: torch.Tensor) -> torch.Tensor:
-        """
-        The loss function. The output of this method will be used to compute the gradients and update
-        the weights.
+        NOTE: Make sure to put the model in train mode (call `model.train()`) before calling this method.
         """
         raise NotImplementedError
 

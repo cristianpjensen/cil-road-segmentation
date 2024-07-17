@@ -19,7 +19,19 @@ class NeighborUnetModel(UnetModel):
         self.neighbor_kernel = self.neighbor_kernel.unsqueeze(0).unsqueeze(0)
         self.neighbor_kernel = nn.Parameter(self.neighbor_kernel, requires_grad=False)
 
-    def loss(self, pred_BHW, target_BHW):
+    def training_step(self, input_BCHW, target_BHW):
+        self.optimizer.zero_grad()
+
+        pred_BHW = self.model(input_BCHW).squeeze(1)
+        loss = self._loss(pred_BHW, target_BHW)
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optimizer.step()
+
+        return { "loss": loss.item() }
+
+    def _loss(self, pred_BHW, target_BHW):
         bce_loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
 
         pad = self.neighbor_size // 2

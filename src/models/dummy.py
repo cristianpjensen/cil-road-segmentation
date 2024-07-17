@@ -14,14 +14,19 @@ import torch.nn.functional as F
 class DummyModel(BaseModel):
     def create_model(self):
         self.model = Dummy(patch_size=16 if self.config["predict_patches"] else 1)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["lr"])
 
-    def step(self, input_BCHW):
-        return self.model(input_BCHW).squeeze(1)
+    def training_step(self, input_BCHW, target_BHW):
+        self.optimizer.zero_grad()
 
-    def loss(self, pred_BHW, target_BHW):
-        # Do not use sigmoid in the model, because it is more numerically stable to use BCE with
-        # logits, which combines the sigmoid and the BCE loss in a single function.
-        return F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
+        pred_BHW = self.model(input_BCHW).squeeze(1)
+        loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.optimizer.step()
+
+        return { "loss": loss.item() }
 
     def predict(self, input_BCHW):
         return F.sigmoid(self.model(input_BCHW).squeeze(1))

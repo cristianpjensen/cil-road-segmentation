@@ -1,15 +1,17 @@
 import os
 import tempfile
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, random_split
 import sacred
+from collections import defaultdict
+from tqdm import tqdm
+from millify import millify
+from torch.utils.data import DataLoader, random_split
 from sacred.utils import apply_backspaces_and_linefeeds
 from sacred import Experiment
 from sacred.observers import FileStorageObserver
-from tqdm import tqdm
 
 from src.augmentation import alternating_transforms, compose_transforms
+from src.models.base import BaseModel
 from src.models.create_model import create_model
 from src.dataset import ImageSegmentationDataset, denormalize
 from src.constants import DEVICE, IMAGE_HEIGHT, IMAGE_WIDTH
@@ -37,7 +39,7 @@ ex.captured_out_filter = apply_backspaces_and_linefeeds
 def config():
     final_data_dir = "data"
     pretrain_data_dir = None
-    model_name = "dummy" # "dummy", "unet", "neighbor_unet", "unet++"
+    model_name = "dummy" # "dummy", "unet", "neighbor_unet", "unet++", "pix2pix"
     model_config = {
         # Configuration specific to U-nets
         "activation": "relu", # "relu", "gelu", "silu"
@@ -56,7 +58,12 @@ def config():
         # Configuration specific to model_name="unet++"
         "unetplusplus": {
             "deep_supervision": True,
-        }
+        },
+
+        # Configuration specific to model_name="pix2pix"
+        "pix2pix": {
+            "l1_weight": 100,
+        },
     }
     epochs = 1000
     batch_size = 4
@@ -70,11 +77,11 @@ def config():
         "mode": "max",
     }
     pretraining_early_stopping_config = {
-        # We have significantly more data for pretraining
+        # We have significantly more data for pretraining, so patience should be lower
         "patience": 10,
         "min_delta": 1e-4,
-        "key": "train_loss",
-        "mode": "min",
+        "key": "valid_patch_acc",
+        "mode": "max",
     }
     output_images_every = 10
     val_size = 10
@@ -88,13 +95,11 @@ def get_iterator(iterator, is_pbar, **kwargs):
 
 
 def train(
-    model: nn.Module,
+    model: BaseModel,
     name: str,
     data: torch.utils.data.Dataset,
     valid_size: int,
     batch_size: int,
-    optimizer: torch.optim.Optimizer,
-    scheduler: torch.optim.lr_scheduler.LRScheduler | None,
     transforms: list[str],
     seed: int,
     valid_data: torch.utils.data.Dataset | None=None,
@@ -131,15 +136,6 @@ def train(
     best_valid_score = -float("inf")
     no_improvement = 0
 
-    # Metrics to be kept track of. Make sure all metrics contain either train or valid, such that
-    # they are normalized appropriately.
-    metrics = {
-        "train_loss": 0,
-        "valid_f1": 0,
-        "valid_patch_acc": 0,
-        "valid_pixel_acc": 0,
-    }
-
     pbar = get_iterator(range(epochs))
     for epoch in pbar:
         # Check for early stopping
@@ -147,13 +143,11 @@ def train(
             break
 
         # Reset metrics
-        metrics = { k: 0 for k in metrics }
+        metrics = defaultdict(float)
 
         # Training
         model.train()
         for i, (input_BCHW, input_files, target_B1HW, _) in enumerate(get_iterator(train_loader, leave=False)):
-            model.zero_grad()
-
             # `altflip` generalized to vertical and horizontal flips, and rotations
             # (https://arxiv.org/pdf/2404.00498). The transformation depends on the epoch and the
             # file name, thus it is different for each image, but every N epochs, all transformed
@@ -163,15 +157,10 @@ def train(
 
             # Forward pass
             input_BCHW, target_B1HW = input_BCHW.to(DEVICE), target_B1HW.to(DEVICE)
-            pred_BHW = model.step(input_BCHW)
-            loss = model.loss(pred_BHW, target_B1HW.squeeze(1))
+            loss_log = model.training_step(input_BCHW, target_B1HW.squeeze(1))
 
-            # Compute gradient and update weights
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-
-            metrics["train_loss"] += loss.item() * input_BCHW.shape[0]
+            for k, v in loss_log.items():
+                metrics["train_" + k] += v * input_BCHW.shape[0]
 
         # Predict validation images every `output_images_every`` epochs and save the images as artifacts
         if epoch % output_val_images_every == 0:
@@ -206,13 +195,6 @@ def train(
             if "train" in k:
                 metrics[k] /= len(train_data)
 
-        # Update LR scheduler
-        if scheduler is not None:
-            if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                scheduler.step(metrics[early_stopping_key])
-            else:
-                scheduler.step()
-
         if early_stopping_mode == "min":
             early_stopping_metric = -metrics[early_stopping_key]
         else:
@@ -227,7 +209,7 @@ def train(
         # Save best model based on validation loss
         if early_stopping_metric > best_valid_score:
             best_valid_score = early_stopping_metric
-            torch.save(model.state_dict(), model_tmp_file.name)
+            model.save(model_tmp_file.name)
 
         # Log metrics and update pbar with them
         for k, v in metrics.items():
@@ -266,12 +248,10 @@ def main(
 
     model = create_model(
         model_name,
-        { **model_config, "predict_patches": predict_patches }
+        { **model_config, "predict_patches": predict_patches, "lr": lr }
     )
-    model.to(DEVICE)
-    print(f"Model '{model_name}' created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters.")
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    model.to_device(DEVICE)
+    print(f"Model '{model_name}' created with {millify(model.num_params(), precision=1)} trainable parameters.")
 
     # Load final data now, so we can use the validation data during pretraining
     final_data = ImageSegmentationDataset(
@@ -284,7 +264,6 @@ def main(
 
     # Pretraining
     if pretrain_data_dir is not None:
-        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer)
         pretrain_data = ImageSegmentationDataset(
             os.path.join(pretrain_data_dir, "images"),
             os.path.join(pretrain_data_dir, "groundtruth"),
@@ -297,8 +276,6 @@ def main(
             pretrain_data,
             val_size,
             batch_size,
-            optimizer,
-            scheduler,
             transforms,
             seed,
             valid_data=valid_data,
@@ -313,18 +290,15 @@ def main(
         )
 
         # Load best model from pretraining
-        model.load_state_dict(torch.load(os.path.join(observer.dir, "model_pretraining.pt")))
+        model.load(os.path.join(observer.dir, "model_pretraining.pt"))
 
     # Finetuning
-    scheduler = torch.optim.lr_scheduler.LinearLR(optimizer)
     train(
         model,
         "finetuning",
         train_data,
         val_size,
         batch_size,
-        optimizer,
-        scheduler,
         transforms,
         seed,
         valid_data=valid_data,
@@ -339,7 +313,7 @@ def main(
     )
 
     # Load best model
-    model.load_state_dict(torch.load(os.path.join(observer.dir, "model_finetuning.pt")))
+    model.load(os.path.join(observer.dir, "model_finetuning.pt"))
 
     # Test and output submission file
     model.eval()
