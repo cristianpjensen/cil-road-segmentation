@@ -27,12 +27,18 @@ class Pix2PixModel(BaseModel):
         self.d_optimizer = torch.optim.AdamW(self.discriminator.parameters(), lr=self.config["lr"])
 
         self.l1_weight = self.config["pix2pix"]["l1_weight"]
+        self.predict_patches = self.config["predict_patches"]
 
     def training_step(self, input_BCHW, target_BHW):
         # Train the discriminator
         self.d_optimizer.zero_grad()
 
-        pred_BHW = F.sigmoid(self.generator(input_BCHW).squeeze(1)).detach()
+        if self.predict_patches:
+            patchwise_pred_BMN = F.sigmoid(self.generator(input_BCHW).detach().squeeze(1))
+            pred_BHW = patchwise_pred_BMN.repeat_interleave(PATCH_SIZE, dim=-2).repeat_interleave(PATCH_SIZE, dim=-1)
+        else:
+            pred_BHW = F.sigmoid(self.generator(input_BCHW).detach().squeeze(1))
+
         real_pred = self.discriminator(input_BCHW, target_BHW.unsqueeze(1))
         fake_pred = self.discriminator(input_BCHW, pred_BHW.unsqueeze(1))
         d_real_loss, d_fake_loss = self._discriminator_loss(real_pred, fake_pred)
