@@ -81,7 +81,8 @@ class ImageSegmentationDataset(Dataset):
         return self.input_NCHW.shape[0]
 
     def pos_weight(self):
-        """Negative / positive occurrence ratio."""
+        """Negative / positive occurrence ratio. This is how much weight should be given to the
+        positive class."""
 
         if self.target_NHW is not None:
             return (1 - self.target_NHW).sum() / self.target_NHW.sum()

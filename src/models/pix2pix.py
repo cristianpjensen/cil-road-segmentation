@@ -177,8 +177,10 @@ class PatchDiscriminator(nn.Module):
         )
         self.combo_net = nn.Sequential(
             PatchDiscriminatorTargetBlock(1024, 512), # [512, 25, 25]
-            PatchDiscriminatorTargetBlock(512, 512), # [512, 25, 25]
-            nn.Conv2d(512, 1, kernel_size=4, padding=2, bias=False), # [1, 25, 25]
+            PatchDiscriminatorTargetBlock(512, 256), # [256, 25, 25]
+            PatchDiscriminatorTargetBlock(256, 128), # [128, 25, 25]
+            PatchDiscriminatorTargetBlock(128, 64), # [64, 25, 25]
+            nn.Conv2d(64, 1, kernel_size=4, padding=2, bias=False), # [1, 25, 25]
         )
 
         self.apply(init_weights)

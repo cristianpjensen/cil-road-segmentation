@@ -15,12 +15,13 @@ class DummyModel(BaseModel):
     def create_model(self):
         self.model = Dummy(patch_size=16 if self.config["predict_patches"] else 1)
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["lr"])
+        self.pos_weight = self.config["pos_weight"]
 
     def training_step(self, input_BCHW, target_BHW):
         self.optimizer.zero_grad()
 
         pred_BHW = self.model(input_BCHW).squeeze(1)
-        loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
+        loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.pos_weight)
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)

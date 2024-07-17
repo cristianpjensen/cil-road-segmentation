@@ -32,7 +32,7 @@ class NeighborUnetModel(UnetModel):
         return { "loss": loss.item() }
 
     def _loss(self, pred_BHW, target_BHW):
-        bce_loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW)
+        bce_loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.pos_weight)
 
         pad = self.neighbor_size // 2
         neighbor_target_BHW = F.conv2d(

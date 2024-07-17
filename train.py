@@ -88,6 +88,7 @@ def config():
     val_size = 10
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     predict_patches = False
+    pos_weight = False
 
 
 @ex.capture
@@ -240,19 +241,13 @@ def main(
     val_size: int,
     transforms: str,
     predict_patches: bool,
+    pos_weight: bool,
 ):
     # Config parsing
     if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
         raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
 
     print(f"Device: {DEVICE}")
-
-    model = create_model(
-        model_name,
-        { **model_config, "predict_patches": predict_patches, "lr": lr }
-    )
-    model.to_device(DEVICE)
-    print(f"Model '{model_name}' created with {millify(model.num_params(), precision=1)} trainable parameters.")
 
     # Load final data now, so we can use the validation data during pretraining
     final_data = ImageSegmentationDataset(
@@ -262,6 +257,19 @@ def main(
         size=(IMAGE_HEIGHT, IMAGE_WIDTH),
     )
     train_data, valid_data = random_split(final_data, [len(final_data) - val_size, val_size])
+
+    model = create_model(
+        model_name,
+        {
+            **model_config,
+            "predict_patches": predict_patches,
+            "lr": lr,
+            "pos_weight": final_data.pos_weight() if pos_weight else 1.0,
+        },
+    )
+    model.to_device(DEVICE)
+    print(f"Model '{model_name}' created with {millify(model.num_params(), precision=1)} trainable parameters.")
+
 
     # Pretraining
     if pretrain_data_dir is not None:
