@@ -50,9 +50,7 @@ def patch_f1_score(pred_BHW: torch.Tensor, target_BHW: torch.Tensor, is_patches:
     tp = (patchwise_pred_BD & patchwise_target_BD).float().sum()
     fp = (patchwise_pred_BD & ~patchwise_target_BD).float().sum()
     fn = (~patchwise_pred_BD & patchwise_target_BD).float().sum()
-    precision = tp / (tp + fp)
-    recall = tp / (tp + fn)
-    f1 = 2 * precision * recall / (precision + recall)
+    f1 = 2 * tp / (2 * tp + fp + fn)
 
     return f1
 

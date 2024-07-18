@@ -264,12 +264,11 @@ def main(
             **model_config,
             "predict_patches": predict_patches,
             "lr": lr,
-            "pos_weight": final_data.pos_weight() if pos_weight else 1.0,
+            "pos_weight": final_data.pos_weight() if pos_weight else torch.tensor(1.0),
         },
     )
     model.to_device(DEVICE)
     print(f"Model '{model_name}' created with {millify(model.num_params(), precision=1)} trainable parameters.")
-
 
     # Pretraining
     if pretrain_data_dir is not None:
