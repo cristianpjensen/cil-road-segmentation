@@ -66,22 +66,21 @@ def config():
             "patch_discriminator": False,
         },
     }
-    epochs = 1000
-    batch_size = 4
+    epochs = 10000
+    batch_size = 8
     lr = 1e-3
     is_pbar = True
     is_early_stopping = True
     early_stopping_config = {
-        "patience": 50,
+        "patience": 100,
         "min_delta": 1e-4,
-        "key": "valid_patch_acc",
+        "key": "valid_f1",
         "mode": "max",
     }
     pretraining_early_stopping_config = {
-        # We have significantly more data for pretraining, so patience should be lower
-        "patience": 10,
+        "patience": 50,
         "min_delta": 1e-4,
-        "key": "valid_patch_acc",
+        "key": "valid_f1",
         "mode": "max",
     }
     output_images_every = 10

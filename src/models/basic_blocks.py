@@ -51,14 +51,12 @@ class Res18Block(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
+                nn.init.normal_(m.weight, 0.0, 0.02)
                 if m.bias is not None:
                     nn.init.normal_(m.bias, 0.0, 0.02)
 
-        # Initialize block to always output 0, such that it is initialized as an identity function
-        for m in self.block.modules():
             if isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 0)
+                nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
 
@@ -91,13 +89,12 @@ class Res50Block(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
+                nn.init.normal_(m.weight, 0.0, 0.02)
                 if m.bias is not None:
                     nn.init.normal_(m.bias, 0.0, 0.02)
 
-        for m in self.block.modules():
             if isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 0)
+                nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
 
@@ -124,13 +121,12 @@ class ResV2Block(nn.Module):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
+                nn.init.normal_(m.weight, 0.0, 0.02)
                 if m.bias is not None:
                     nn.init.normal_(m.bias, 0.0, 0.02)
 
-        for m in self.block.modules():
             if isinstance(m, nn.BatchNorm2d):
-                nn.init.constant_(m.weight, 0)
+                nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
 
