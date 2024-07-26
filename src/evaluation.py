@@ -108,7 +108,7 @@ def output_mask_overlay(
 
     for i, overlay_img in enumerate(overlay_BCHW):
         with tempfile.NamedTemporaryFile() as tmp_file:
-            write_png((overlay_img * 255).byte(), tmp_file.name)
+            write_png((overlay_img * 255).byte(), tmp_file.name, compression_level=0)
             ex.add_artifact(tmp_file.name, get_patch_overlay_dir(ex_dir, dir, epoch, file_names[i]))
 
 
@@ -136,7 +136,7 @@ def output_pixel_pred(
     pred_BHW = (pred_BHW.unsqueeze(1) * 255).byte().cpu()
     for i, pred_img in enumerate(pred_BHW):
         with tempfile.NamedTemporaryFile() as tmp_file:
-            write_png(pred_img, tmp_file.name)
+            write_png(pred_img, tmp_file.name, compression_level=0)
             ex.add_artifact(tmp_file.name, get_pixel_pred_dir(ex_dir, dir, epoch, file_names[i]))
 
 
@@ -175,7 +175,7 @@ def output_submission_file(
             for i in range(patchwise_pred_BMN.shape[0]):
                 # Output prediction map
                 with tempfile.NamedTemporaryFile() as tmp_file:
-                    write_png((pred_BHW[i].unsqueeze(0) * 255).byte().cpu(), tmp_file.name)
+                    write_png((pred_BHW[i].unsqueeze(0) * 255).byte().cpu(), tmp_file.name, compression_level=0)
                     ex.add_artifact(tmp_file.name, os.path.join("test", input_files[i]))
 
                 # Add to submission file

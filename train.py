@@ -66,6 +66,7 @@ def config():
             "patch_discriminator": False,
         },
     }
+    loss = "bce" # "bce", "dice", "bce+dice"
     epochs = 10000
     batch_size = 8
     lr = 1e-3
@@ -74,20 +75,20 @@ def config():
     early_stopping_config = {
         "patience": 100,
         "min_delta": 1e-4,
+        "val_size": 16,
         "key": "valid_f1",
         "mode": "max",
     }
     pretraining_early_stopping_config = {
-        "patience": 50,
+        "patience": 20,
         "min_delta": 1e-4,
+        "val_size": 128,
         "key": "valid_f1",
         "mode": "max",
     }
     output_images_every = 10
-    val_size = 10
     transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     predict_patches = False
-    pos_weight = False
 
 
 @ex.capture
@@ -103,7 +104,6 @@ def train(
     batch_size: int,
     transforms: list[str],
     seed: int,
-    valid_data: torch.utils.data.Dataset | None=None,
     output_val_images_every: int=10,
     epochs: int=1000,
     patience: int=50,
@@ -121,14 +121,9 @@ def train(
     model_tmp_file = tempfile.NamedTemporaryFile()
 
     # Data loaders
-    if valid_data is None:
-        train_data, valid_data = random_split(data, [len(data) - valid_size, valid_size])
-        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-    else:
-        train_data = data
-        train_loader = DataLoader(data, batch_size=batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
+    train_data, valid_data = random_split(data, [len(data) - valid_size, valid_size])
+    train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    valid_loader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
     
     # Data augmentation
     transformations = compose_transforms(transforms)
@@ -229,6 +224,7 @@ def main(
     pretrain_data_dir: str | None,
     model_name: str,
     model_config: dict,
+    loss: str,
     epochs: int,
     batch_size: int,
     lr: float,
@@ -237,25 +233,26 @@ def main(
     early_stopping_config: dict,
     pretraining_early_stopping_config: dict,
     output_images_every: int,
-    val_size: int,
     transforms: str,
     predict_patches: bool,
-    pos_weight: bool,
 ):
     # Config parsing
     if "".join(sorted(transforms)) not in ["", "h", "r", "v", "hr", "hv", "rv", "hrv"]:
         raise ValueError("Transforms should be a combination of 'v', 'h', and 'r'.")
 
-    print(f"Device: {DEVICE}")
+    if loss not in ["bce", "dice", "bce+dice"]:
+        raise ValueError("Loss should be 'bce', 'dice', or 'bce+dice'.")
 
-    # Load final data now, so we can use the validation data during pretraining
-    final_data = ImageSegmentationDataset(
-        os.path.join(final_data_dir, "training", "images"),
-        os.path.join(final_data_dir, "training", "groundtruth"),
-        target_is_patches=predict_patches,
-        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
-    )
-    train_data, valid_data = random_split(final_data, [len(final_data) - val_size, val_size])
+    if model_name not in ["dummy", "unet", "neighbor_unet", "unet++", "pix2pix"]:
+        raise ValueError("Model name should be 'dummy', 'unet', 'neighbor_unet', 'unet++', or 'pix2pix'.")
+    
+    if model_name == "pix2pix" and loss != "bce":
+        raise ValueError("Changing loss for pix2pix is not supported.")
+
+    if model_name == "unet++" and model_config["bottleneck_mhsa_layers"] > 0:
+        raise ValueError("U-Net++ does not support bottleneck multi-head self-attention layers.")
+
+    print(f"Device: {DEVICE}")
 
     model = create_model(
         model_name,
@@ -263,7 +260,7 @@ def main(
             **model_config,
             "predict_patches": predict_patches,
             "lr": lr,
-            "pos_weight": final_data.pos_weight() if pos_weight else torch.tensor(1.0),
+            "loss": loss,
         },
     )
     model.to_device(DEVICE)
@@ -281,11 +278,10 @@ def main(
             model,
             "pretraining",
             pretrain_data,
-            val_size,
+            pretraining_early_stopping_config["val_size"],
             batch_size,
             transforms,
             seed,
-            valid_data=valid_data,
             output_val_images_every=output_images_every,
             epochs=epochs,
             patience=pretraining_early_stopping_config["patience"] if is_early_stopping else epochs + 1,
@@ -299,16 +295,25 @@ def main(
         # Load best model from pretraining
         model.load(os.path.join(observer.dir, "model_pretraining.pt"))
 
+        # Divide learning rate by 10 after pretraining (do not if no pretraining)
+        model.set_optimizer_lr(lr / 10)
+
+    final_data = ImageSegmentationDataset(
+        os.path.join(final_data_dir, "training", "images"),
+        os.path.join(final_data_dir, "training", "groundtruth"),
+        target_is_patches=predict_patches,
+        size=(IMAGE_HEIGHT, IMAGE_WIDTH),
+    )
+
     # Finetuning
     train(
         model,
         "finetuning",
-        train_data,
-        val_size,
+        final_data,
+        early_stopping_config["val_size"],
         batch_size,
         transforms,
         seed,
-        valid_data=valid_data,
         output_val_images_every=output_images_every,
         epochs=epochs,
         patience=early_stopping_config["patience"] if is_early_stopping else epochs + 1,

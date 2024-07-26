@@ -4,13 +4,14 @@ import torch.nn.functional as F
 
 from .base import BaseModel
 from .basic_blocks import ConvBlock
-from .constants import ACTIVATIONS, BLOCKS
+from .constants import ACTIVATIONS, BLOCKS, LOSSES
 from ..constants import PATCH_SIZE
 
 
 class UnetPlusPlusModel(BaseModel):
     def create_model(self):
         # This will error if they are not well-defined configuration options
+        self.loss = LOSSES[self.config["loss"]]
         act_fn = ACTIVATIONS[self.config["activation"]]
         block = BLOCKS[self.config["block"]]
         self.model = UnetPlusPlus(
@@ -28,7 +29,7 @@ class UnetPlusPlusModel(BaseModel):
         self.optimizer.zero_grad()
 
         pred_BHW = self.model(input_BCHW).squeeze(2).mean(1)
-        loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.pos_weight)
+        loss = self.loss(pred_BHW, target_BHW)
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)

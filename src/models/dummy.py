@@ -32,6 +32,11 @@ class DummyModel(BaseModel):
     def predict(self, input_BCHW):
         return F.sigmoid(self.model(input_BCHW).squeeze(1))
 
+    def set_optimizer_lr(self, lr):
+        self.config["lr"] = lr
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = lr
+
 
 class Dummy(nn.Module):
     def __init__(self, patch_size: int=1):

@@ -4,13 +4,14 @@ import torch.nn.functional as F
 
 from .base import BaseModel
 from .basic_blocks import ConvBlock
-from .constants import ACTIVATIONS, BLOCKS
+from .constants import ACTIVATIONS, BLOCKS, LOSSES
 from ..constants import PATCH_SIZE
 
 
 class UnetModel(BaseModel):
     def create_model(self):
         # This will error if they are not well-defined configuration options
+        self.loss = LOSSES[self.config["loss"]]
         act_fn = ACTIVATIONS[self.config["activation"]]
         block = BLOCKS[self.config["block"]]
         self.model = Unet(
@@ -23,13 +24,12 @@ class UnetModel(BaseModel):
             patch_size=PATCH_SIZE if self.config["predict_patches"] else 1,
         )
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["lr"])
-        self.pos_weight = self.config["pos_weight"]
 
     def training_step(self, input_BCHW, target_BHW):
         self.optimizer.zero_grad()
 
         pred_BHW = self.model(input_BCHW).squeeze(1)
-        loss = F.binary_cross_entropy_with_logits(pred_BHW, target_BHW, pos_weight=self.pos_weight)
+        loss = self.loss(pred_BHW, target_BHW)
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)

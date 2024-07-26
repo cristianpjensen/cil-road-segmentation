@@ -81,6 +81,17 @@ class Pix2PixModel(BaseModel):
     def predict(self, input_BCHW):
         return F.sigmoid(self.generator(input_BCHW).squeeze(1))
 
+    def set_optimizer_lr(self, new_lr: float):
+        if self.optimizer is None:
+            raise ValueError("No optimizer defined.")
+
+        self.config["lr"] = new_lr
+        for param_group in self.g_optimizer.param_groups:
+            param_group["lr"] = new_lr
+
+        for param_group in self.d_optimizer.param_groups:
+            param_group["lr"] = new_lr
+
 
 class DiscriminatorDownsample(nn.Module):
     """An encoder block that is used in the pix2pix discriminator."""

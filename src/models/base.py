@@ -7,6 +7,7 @@ class BaseModel():
     def __init__(self, config):
         super().__init__()
         self.config = config
+        self.optimizer = None
         self.create_model()
 
     def to_device(self, device: torch.device):
@@ -39,6 +40,14 @@ class BaseModel():
         for attr in self.__dict__.values():
             if isinstance(attr, nn.Module):
                 attr.eval()
+
+    def set_optimizer_lr(self, new_lr: float):
+        if self.optimizer is None:
+            raise ValueError("No optimizer defined.")
+
+        self.config["lr"] = new_lr
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = new_lr
 
     def save(self, path: str):
         """Iterate over attributes and save the model to the given path."""
