@@ -23,7 +23,6 @@ class UnetPlusPlusModel(BaseModel):
             deep_supervision=self.config["unetplusplus"]["deep_supervision"],
         )
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config["lr"])
-        self.pos_weight = self.config["pos_weight"]
 
     def training_step(self, input_BCHW, target_BHW):
         self.optimizer.zero_grad()
