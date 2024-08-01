@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from .constants import LOSSES
 from .unet import UnetModel
+from ..constants import DEVICE
 
 
 class NeighborUnetModel(UnetModel):
@@ -19,7 +20,7 @@ class NeighborUnetModel(UnetModel):
         self.neighbor_kernel[self.neighbor_size // 2, self.neighbor_size // 2] = 0
         self.neighbor_kernel /= self.neighbor_kernel.sum()
         self.neighbor_kernel = self.neighbor_kernel.unsqueeze(0).unsqueeze(0)
-        self.neighbor_kernel = nn.Parameter(self.neighbor_kernel, requires_grad=False)
+        self.neighbor_kernel = nn.Parameter(self.neighbor_kernel, requires_grad=False).to(DEVICE)
 
     def training_step(self, input_BCHW, target_BHW):
         self.optimizer.zero_grad()

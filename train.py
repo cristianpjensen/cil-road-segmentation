@@ -87,7 +87,7 @@ def config():
         "mode": "max",
     }
     output_images_every = 10
-    transforms = "" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
+    transforms = "hrv" # If contains "v", then vertical flip, if contains "h", then horizontal flip, and if contains "r", then rotates
     predict_patches = False
 
 
